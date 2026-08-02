@@ -1,0 +1,188 @@
+# Turnkey RL Zuul app — one Dockerfile, one compose file.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.rl-app.yaml -p zuul-rl up -d --build
+#   (rl-app.yaml also `include`s the base file, so `-f docker-compose.rl-app.yaml` alone works)
+#   Open: http://127.0.0.1:19090/t/example-tenant/status
+#   Demo: 7 gate changes · 3 intentional failures (change % 7 in {0,1,2})
+
+include:
+  - docker-compose.yaml
+
+services:
+  executor:
+    restart: unless-stopped
+  launcher:
+    restart: unless-stopped
+    volumes:
+      - sshkey:/var/ssh:z
+      - nodessh:/var/node:z
+      # Keep static subnodes READY across reconfigure (Windows can't easily
+      # rebuild the full launcher image due to ansible symlink context).
+      - ../../../zuul/launcher/server.py:/usr/local/lib/python3.11/site-packages/zuul/launcher/server.py:ro
+  node:
+    restart: unless-stopped
+  logs:
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: scheduler
+    image: zuul-rl-app-scheduler:local
+    environment:
+      RL_WINDOW_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
+      RL_WINDOW_POLICY_PATH: /var/lib/zuul/models/ppo_gate_window_table.json
+      # Small baseline: TCP collapses 8→4→2 on failures while RL holds ~8,
+      # so a 10-deep queue shows "TCP runs 2, RL runs 8" immediately.
+      RL_DEFAULT_INITIAL_WINDOW: "8"
+      RL_DEMO_RESET_PATH: /var/lib/zuul/rl_demo_reset.request
+      # Match static provider slots / window capacity (~20–50).
+      RL_WINDOW_EXECUTOR_CAPACITY: "50"
+    volumes:
+      - ./playbooks/:/var/playbooks/:z
+      - sshkey:/var/ssh:z
+      - certs:/var/certs:z
+      - lib-zuul-scheduler:/var/lib/zuul
+
+  web:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: web
+    image: zuul-rl-app-web:local
+    ports:
+      - "0.0.0.0:19090:9000"
+      - "0.0.0.0:9090:9000"
+    volumes:
+      - ./playbooks/:/var/playbooks/:z
+      - certs:/var/certs:z
+      - lib-zuul-web:/var/lib/zuul
+      - rl-report:/usr/local/lib/python3.11/site-packages/zuul/web/static/rl-report
+    command: |
+      sh -c 'python3 /inject-rl-ui.py && \
+             /var/playbooks/wait-to-start-certs.sh && \
+             exec zuul-web -f'
+
+  rl-bootstrap:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: bootstrap
+    image: zuul-rl-app-bootstrap:local
+    environment:
+      GERRIT_URL: http://gerrit:8080
+      ZUUL_URL: http://web:9000
+    volumes:
+      - bootstrap-state:/var/lib/bootstrap
+    depends_on:
+      - gerrit
+      - web
+      - scheduler
+    restart: "no"
+    networks:
+      - zuul
+
+  rl-control:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: control
+    image: zuul-rl-app-control:local
+    environment:
+      RL_CONTROL_BASE_DIR: /results
+      RL_CONTROL_PUBLISH_DIR: /published
+      RL_CONTROL_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
+      RL_CONTROL_ZUUL_API: http://web:9000
+      RL_DEFAULT_INITIAL_WINDOW: "8"
+      RL_DEMO_RESET_PATH: /var/lib/zuul/rl_demo_reset.request
+      DEMO_CHANGE_COUNT: "150"
+      DEMO_BATCH_SIZE: "10"
+      # 20s pacing keeps gate queue depth >= initial window (8) mid-run:
+      # jobs take ~6s+overhead, so ~10 arrivals / 20s outpace the ~8-wide
+      # window and backlog builds → in-flight RL vs TCP diverges visibly.
+      DEMO_BATCH_INTERVAL_SEC: "20"
+      DEMO_DURATION_SEC: "300"
+      DEMO_FAIL_PER_BATCH: "5"
+      DEMO_PASS_PER_BATCH: "5"
+      DEMO_GATE_WAIT_SEC: "120"
+      # 300s / 20s interval = 15 batches × 5 fails
+      DEMO_EXPECTED_FAILURES: "75"
+      DEMO_AUDIT_WAIT: "3"
+      DEMO_RESET_GRACE_SEC: "1"
+      DEMO_QUEUE_CLEAR_TIMEOUT: "30"
+      DEMO_QUEUE_CLEAR_TIMEOUT_PER_ITEM: "0.12"
+      DEMO_QUEUE_CLEAR_MAX_TIMEOUT: "600"
+      DEMO_QUEUE_POLL_INTERVAL: "0.5"
+      DEMO_QUEUE_PROCESSING_WAIT: "0.75"
+      DEMO_SCHEDULER_PURGE_WAIT: "1.5"
+      DEMO_DEQUEUE_WORKERS: "24"
+      TRAFFIC_WORKERS: "10"
+      TRAFFIC_VERIFIED_TIMEOUT: "180"
+      LIVE_METRICS_CACHE_SEC: "2"
+      BUILDS_CACHE_SEC: "5"
+      ZUUL_ADMIN_JWT_SECRET: exampleSecret
+      GERRIT_URL: http://gerrit:8080
+      RL_CONFIG_BUNDLE: /bootstrap/zuul-config
+      RL_SCHEDULER_CONTAINER: zuul-rl-scheduler-1
+      RL_COMPOSE_DIR: /compose
+      RL_COMPOSE_PROJECT: zuul-rl
+      RL_COMPOSE_FILE: docker-compose.rl-app.yaml
+    volumes:
+      - ../../../research/results:/results
+      - lib-zuul-scheduler:/var/lib/zuul
+      - rl-report:/published
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/compose:ro
+    ports:
+      - "19100:19100"
+    depends_on:
+      rl-bootstrap:
+        condition: service_completed_successfully
+      web:
+        condition: service_started
+      scheduler:
+        condition: service_started
+    networks:
+      - zuul
+
+  rl-traffic:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: control
+    image: zuul-rl-app-control:local
+    environment:
+      GERRIT_URL: http://gerrit:8080
+      # 0 = disabled; demo traffic is driven by rl-control POST /run-demo
+      RL_TRAFFIC_INTERVAL: "0"
+    entrypoint: ["python", "-u", "-c"]
+    command:
+      - |
+        import os
+        import subprocess
+        import time
+        interval = int(os.getenv("RL_TRAFFIC_INTERVAL", "0"))
+        if interval <= 0:
+            print("rl-traffic: disabled (use rl-control /run-demo)")
+            while True:
+                time.sleep(3600)
+        while True:
+            subprocess.run(
+                ["python", "/app/traffic/generator.py", "--count", "3", "--gate"],
+                check=False,
+            )
+            time.sleep(interval)
+    depends_on:
+      rl-bootstrap:
+        condition: service_completed_successfully
+      scheduler:
+        condition: service_started
+      web:
+        condition: service_started
+    networks:
+      - zuul
+
+volumes:
+  rl-report:
+  bootstrap-state:

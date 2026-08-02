@@ -1,0 +1,2607 @@
+    <style id="zuul-rl-window-style">
+      #zuul-rl-window-banner {
+        background: #004368;
+        color: #fff;
+        padding: 10px 20px;
+        font-size: 14px;
+        font-family: RedHatText, Overpass, sans-serif;
+        border-bottom: 2px solid #06c;
+        margin: 0 0 12px 0;
+        border-radius: 4px;
+        line-height: 1.45;
+      }
+      #zuul-rl-window-banner .zuul-rl-banner-title {
+        font-weight: 600;
+        margin-right: 6px;
+      }
+      #zuul-rl-window-banner .zuul-rl-tcp {
+        color: #f0ab00;
+        font-weight: 600;
+      }
+      #zuul-rl-window-banner .zuul-rl-active {
+        color: #92d400;
+        font-weight: 600;
+      }
+      #zuul-rl-window-banner .zuul-rl-mode {
+        opacity: 0.85;
+        font-size: 12px;
+      }
+      .zuul-rl-queue-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 8px;
+        background: #f0ab00;
+        color: #151515;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-align: 0.1em;
+      }
+      .zuul-rl-queue-badge.zuul-rl-badge-active {
+        background: #92d400;
+      }
+      #zuul-rl-report-panel {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        width: 520px;
+        height: 780px;
+        z-index: 10001;
+        border: 1px solid #8a8d90;
+        border-radius: 6px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(3, 3, 3, 0.35);
+        overflow: hidden;
+        display: none;
+        transition: height 0.2s ease;
+      }
+      #zuul-rl-report-panel.zuul-rl-minimized {
+        height: auto;
+        width: auto;
+        min-width: 180px;
+      }
+      #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-report-body,
+      #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-run-btn,
+      #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-report-link {
+        display: none;
+      }
+      #zuul-rl-report-panel .header {
+        background: #151515;
+        color: #fff;
+        font-size: 12px;
+        padding: 6px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      #zuul-rl-report-panel .header-title {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #zuul-rl-report-panel .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      #zuul-rl-report-panel .header a {
+        color: #73bcf7;
+        text-decoration: none;
+        font-size: 11px;
+      }
+      #zuul-rl-minimize-btn {
+        background: transparent;
+        color: #fff;
+        border: 1px solid #6a6e73;
+        border-radius: 3px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      #zuul-rl-minimize-btn:hover {
+        background: #393f44;
+      }
+      #zuul-rl-report-body {
+        padding: 8px 10px;
+        height: calc(100% - 35px);
+        overflow: auto;
+      }
+      #zuul-rl-run-btn {
+        background: #06c;
+        color: #fff;
+        border: 0;
+        border-radius: 3px;
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+      #zuul-rl-run-btn[disabled] {
+        background: #6a6e73;
+        cursor: default;
+      }
+      #zuul-rl-extend-btn {
+        background: #3e8635;
+        color: #fff;
+        border: 0;
+        border-radius: 3px;
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+      #zuul-rl-extend-btn[disabled] {
+        background: #6a6e73;
+        cursor: default;
+      }
+      #zuul-rl-demo-progress {
+        display: none;
+        margin-bottom: 8px;
+        padding: 8px;
+        background: #e7f1fa;
+        border: 1px solid #06c;
+        border-radius: 4px;
+      }
+      #zuul-rl-demo-progress.zuul-rl-demo-active {
+        display: block;
+      }
+      #zuul-rl-demo-phase {
+        font-size: 12px;
+        font-weight: 600;
+        color: #004368;
+        margin-bottom: 4px;
+        line-height: 1.35;
+      }
+      #zuul-rl-demo-detail {
+        font-size: 11px;
+        color: #393f44;
+        margin-bottom: 6px;
+        line-height: 1.35;
+      }
+      #zuul-rl-demo-bar-wrap {
+        height: 8px;
+        background: #d2d2d2;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #zuul-rl-demo-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #06c, #73bcf7);
+        border-radius: 4px;
+        transition: width 0.4s ease;
+      }
+      #zuul-rl-demo-bar.zuul-rl-demo-indeterminate {
+        width: 40% !important;
+        animation: zuul-rl-demo-pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes zuul-rl-demo-pulse {
+        0% { margin-left: 0%; }
+        50% { margin-left: 60%; }
+        100% { margin-left: 0%; }
+      }
+      .zuul-rl-status-line {
+        font-size: 12px;
+        margin-bottom: 8px;
+        line-height: 1.4;
+      }
+      .zuul-rl-status-line.zuul-rl-status-running {
+        color: #06c;
+      }
+      .zuul-rl-status-line.zuul-rl-status-error {
+        color: #c9190b;
+      }
+      .zuul-rl-status-line.zuul-rl-status-live {
+        color: #3e8635;
+      }
+      .zuul-rl-failures {
+        font-size: 11px;
+        margin-bottom: 8px;
+        padding: 6px 8px;
+        background: #faeae5;
+        border-left: 3px solid #c9190b;
+        border-radius: 3px;
+        max-height: 160px;
+        overflow: auto;
+      }
+      .zuul-rl-failure-row {
+        margin-bottom: 6px;
+        line-height: 1.35;
+      }
+      .zuul-rl-failure-impact {
+        font-size: 10px;
+        color: #393f44;
+        margin-top: 2px;
+      }
+      .zuul-rl-impact-summary {
+        font-size: 11px;
+        color: #151515;
+        margin-top: 6px;
+        line-height: 1.4;
+        padding: 6px 8px;
+        background: #fff;
+        border-radius: 3px;
+        border: 1px solid #b8d4b8;
+      }
+      .zuul-rl-failures:empty {
+        display: none;
+      }
+      .zuul-rl-failure-counter {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        padding: 5px 8px;
+        background: #f5f5f5;
+        border-radius: 3px;
+        border: 1px solid #d2d2d2;
+        color: #151515;
+        line-height: 1.35;
+      }
+      .zuul-rl-failure-counter.zuul-rl-has-failures {
+        background: #faeae5;
+        border-color: #c9190b;
+        color: #a30000;
+      }
+      .zuul-rl-failure-counter .zuul-rl-fail-tcp {
+        color: #c46100;
+      }
+      .zuul-rl-failure-counter .zuul-rl-fail-rl {
+        color: #06c;
+      }
+      .zuul-rl-failures strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #a30000;
+      }
+      .zuul-rl-chart-wrap {
+        margin-bottom: 8px;
+      }
+      .zuul-rl-chart-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: #151515;
+        margin-bottom: 2px;
+      }
+      .zuul-rl-chart {
+        width: 100%;
+        height: 110px;
+        border: 1px solid #d2d2d2;
+        border-radius: 3px;
+        display: block;
+        background: #fafafa;
+      }
+      .zuul-rl-legend {
+        font-size: 10px;
+        color: #6a6e73;
+        margin-top: 2px;
+      }
+      .zuul-rl-legend span {
+        margin-right: 10px;
+      }
+      .zuul-rl-legend .swatch {
+        display: inline-block;
+        width: 10px;
+        height: 3px;
+        margin-right: 3px;
+        vertical-align: middle;
+      }
+      .zuul-rl-efficiency-block {
+        margin-bottom: 8px;
+        padding: 8px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        border: 1px solid #d2d2d2;
+      }
+      .zuul-rl-efficiency-value {
+        font-size: 22px;
+        font-weight: 700;
+        color: #06c;
+        line-height: 1.2;
+        margin: 2px 0 4px;
+      }
+      .zuul-rl-efficiency-value.zuul-rl-eff-na {
+        font-size: 16px;
+        color: #6a6e73;
+        font-weight: 600;
+      }
+      .zuul-rl-efficiency-formula {
+        font-size: 10px;
+        color: #6a6e73;
+        margin-bottom: 4px;
+      }
+      #zuul-rl-efficiency-chart {
+        width: 100%;
+        height: 56px;
+        display: block;
+        background: #fff;
+        border-radius: 3px;
+      }
+      .zuul-rl-effectiveness-block {
+        margin-bottom: 8px;
+        padding: 8px;
+        background: #e7f6e7;
+        border: 1px solid #3e8635;
+        border-radius: 4px;
+      }
+      .zuul-rl-effectiveness-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 10px;
+      }
+      .zuul-rl-effectiveness-metric {
+        font-size: 11px;
+        line-height: 1.35;
+      }
+      .zuul-rl-effectiveness-metric.zuul-rl-metric-primary {
+        grid-column: 1 / -1;
+        padding: 6px 8px;
+        background: #fff;
+        border-radius: 4px;
+        border: 1px solid #b8d4b8;
+      }
+      .zuul-rl-effectiveness-label {
+        color: #393f44;
+        font-weight: 600;
+        cursor: help;
+        border-bottom: 1px dotted #8a8d90;
+      }
+      .zuul-rl-effectiveness-value {
+        font-size: 18px;
+        font-weight: 700;
+        color: #3e8635;
+        margin-top: 2px;
+      }
+      .zuul-rl-effectiveness-metric.zuul-rl-metric-primary
+        .zuul-rl-effectiveness-value {
+        font-size: 24px;
+      }
+      .zuul-rl-effectiveness-sub {
+        font-size: 10px;
+        color: #6a6e73;
+        margin-top: 2px;
+      }
+      .zuul-rl-highlight-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .zuul-rl-highlight-card {
+        background: #f5f5f5;
+        border: 1px solid #d2d2d2;
+        border-radius: 4px;
+        padding: 6px 4px;
+        text-align: center;
+        min-width: 0;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-fail {
+        background: #faeae5;
+        border-color: #c9190b;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-rl {
+        background: #e7f1fa;
+        border-color: #06c;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-tcp {
+        background: #fef6e0;
+        border-color: #f0ab00;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-win {
+        background: #e7f6e7;
+        border-color: #3e8635;
+      }
+      .zuul-rl-hl-label {
+        font-size: 9px;
+        color: #6a6e73;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        line-height: 1.2;
+      }
+      .zuul-rl-hl-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: #151515;
+        margin-top: 2px;
+        line-height: 1.2;
+      }
+      .zuul-rl-highlight-card[title],
+      .zuul-rl-tip {
+        cursor: help;
+      }
+      .zuul-rl-hl-label {
+        border-bottom: 1px dotted #8a8d90;
+      }
+      .zuul-rl-chart-axis {
+        font-size: 9px;
+        color: #6a6e73;
+        margin-top: 1px;
+      }
+      .zuul-rl-compare-block {
+        margin: 10px 0 8px;
+        padding: 8px;
+        background: #f5f5f5;
+        border: 1px solid #8a8d90;
+        border-radius: 4px;
+      }
+      .zuul-rl-compare-block table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+        margin-top: 4px;
+      }
+      .zuul-rl-compare-block th,
+      .zuul-rl-compare-block td {
+        border: 1px solid #d2d2d2;
+        padding: 4px 6px;
+        text-align: left;
+      }
+      .zuul-rl-compare-block th {
+        background: #e7f1fa;
+        font-weight: 600;
+      }
+      .zuul-rl-compare-block td.zuul-rl-benefit {
+        color: #3e8635;
+        font-weight: 700;
+      }
+      .zuul-rl-compare-summary {
+        margin-top: 6px;
+        font-size: 11px;
+        line-height: 1.4;
+        color: #151515;
+        padding: 6px 8px;
+        background: #fff;
+        border-radius: 3px;
+        border: 1px solid #b8d4b8;
+      }
+      #zuul-rl-extra-chart {
+        width: 100%;
+        height: 90px;
+        display: block;
+        background: #fafafa;
+        border: 1px solid #d2d2d2;
+        border-radius: 3px;
+      }
+      #zuul-rl-benefit-story {
+        display: none;
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        background: linear-gradient(135deg, #e7f6e7, #f0faf0);
+        border: 1px solid #3e8635;
+        border-left: 4px solid #3e8635;
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #151515;
+      }
+      #zuul-rl-benefit-story .zuul-rl-benefit-headline {
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e4f18;
+        margin-bottom: 2px;
+      }
+      #zuul-rl-benefit-story .zuul-rl-benefit-numbers {
+        font-weight: 600;
+      }
+      #zuul-rl-benefit-story .zuul-rl-benefit-tcp { color: #c46100; }
+      #zuul-rl-benefit-story .zuul-rl-benefit-rl { color: #06c; }
+      #zuul-rl-benefit-story .zuul-rl-benefit-saved { color: #3e8635; }
+      #zuul-rl-demo-warning {
+        display: none;
+        margin-top: 5px;
+        padding: 4px 8px;
+        background: #fdf7e7;
+        border: 1px solid #f0ab00;
+        border-radius: 3px;
+        font-size: 11px;
+        color: #795600;
+        line-height: 1.35;
+      }
+      #zuul-rl-final-summary {
+        display: none;
+        margin-bottom: 8px;
+        padding: 9px 10px;
+        background: #e7f6e7;
+        border: 2px solid #3e8635;
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      #zuul-rl-final-summary .zuul-rl-final-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e4f18;
+        margin-bottom: 4px;
+      }
+      #zuul-rl-final-summary .zuul-rl-final-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      #zuul-rl-final-summary .zuul-rl-final-chip {
+        background: #fff;
+        border: 1px solid #b8d4b8;
+        border-radius: 12px;
+        padding: 2px 9px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #151515;
+      }
+      #zuul-rl-report-panel {
+        height: 860px;
+      }
+      /* --- Section framing: 6 labeled, scannable blocks --- */
+      .zuul-rl-section {
+        margin-bottom: 10px;
+        border: 1px solid #d2d2d2;
+        border-radius: 5px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .zuul-rl-section-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        background: #f0f0f0;
+        border-bottom: 1px solid #d2d2d2;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #393f44;
+      }
+      .zuul-rl-section-title .zuul-rl-section-num {
+        display: inline-block;
+        width: 15px;
+        height: 15px;
+        line-height: 15px;
+        text-align: center;
+        border-radius: 50%;
+        background: #004368;
+        color: #fff;
+        font-size: 9px;
+        flex-shrink: 0;
+      }
+      .zuul-rl-section-body {
+        padding: 8px 9px;
+      }
+      .zuul-rl-section-body > :last-child {
+        margin-bottom: 0;
+      }
+      .zuul-rl-control-buttons {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .zuul-rl-control-buttons button {
+        font-size: 13px;
+        padding: 6px 14px;
+        margin-right: 0;
+      }
+      #zuul-rl-queue-saturation {
+        margin-top: 6px;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.35;
+        background: #f5f5f5;
+        border: 1px solid #d2d2d2;
+        color: #393f44;
+      }
+      #zuul-rl-queue-saturation.zuul-rl-sat-ok {
+        background: #e7f6e7;
+        border-color: #3e8635;
+        color: #1e4f18;
+      }
+      #zuul-rl-queue-saturation.zuul-rl-sat-low {
+        background: #fdf7e7;
+        border-color: #f0ab00;
+        color: #795600;
+      }
+      #zuul-rl-decision-reason {
+        font-size: 11.5px;
+        line-height: 1.45;
+        color: #151515;
+        padding: 6px 8px;
+        background: #e7f1fa;
+        border-left: 3px solid #06c;
+        border-radius: 3px;
+      }
+      #zuul-rl-decision-reason .zuul-rl-reason-label {
+        font-weight: 700;
+        color: #004368;
+      }
+      .zuul-rl-highlight-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-queue {
+        background: #f5f5f5;
+        border-color: #8a8d90;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-queue.zuul-rl-sat-ok {
+        background: #e7f6e7;
+        border-color: #3e8635;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-queue.zuul-rl-sat-low {
+        background: #fdf7e7;
+        border-color: #f0ab00;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-fail .zuul-rl-hl-value {
+        color: #a30000;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-rl .zuul-rl-hl-value {
+        color: #06c;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-tcp .zuul-rl-hl-value {
+        color: #c46100;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-win .zuul-rl-hl-value {
+        color: #3e8635;
+      }
+    </style>
+    <script>
+    (function () {
+      'use strict';
+      var BANNER_ID = 'zuul-rl-window-banner';
+      var PANEL_ID = 'zuul-rl-report-panel';
+      var REPORT_BASE = '/rl-report';
+      var CONTROL_BASE = 'http://localhost:19100';
+      var LIVE_POLL_MS = 2000;
+      var DEMO_POLL_MS = 1500;
+      var STATUS_POLL_MS = 3000;
+      var STATUS_POLL_DEMO_MS = 2000;
+      var GRID_REFRESH_MS = 5000;
+      var GRID_REFRESH_DEMO_MS = 2500;
+      var BASELINE_WINDOW = 8;
+      var DEMO_CHANGE_COUNT = 150;
+      var DEMO_EXPECTED_FAILURES = 75;
+      var DEMO_BATCH_SIZE = 10;
+      var DEMO_DURATION_SEC = 300;
+      var DEMO_FAIL_PER_BATCH = 5;
+      // Bumped when the panel HTML structure changes so stale panels rebuild.
+      var PANEL_LAYOUT_VERSION = '2';
+      var lastMetrics = null;
+      var lastStatusData = null;
+      var demoPollTimer = null;
+      var demoLiveMetricsTimer = null;
+      var demoRunning = false;
+      var metricsInFlight = false;
+      var chartDrawPending = false;
+      var badgeEnhanceTimer = null;
+      var statusPollTimer = null;
+      var gridRefreshTimer = null;
+      // Connection / staleness watchdog state. Staleness is measured as
+      // local time since the server-side progress stamp last CHANGED —
+      // never by comparing server clocks to the browser clock (container
+      // clocks can drift hours from the host under Docker Desktop).
+      var liveMetricsFailStreak = 0;
+      var demoProgressFailStreak = 0;
+      var lastSeenProgressStamp = 0;
+      var lastProgressChangeLocalMs = 0;
+      var STALE_PROGRESS_WARN_SEC = 30;
+      var CONN_LOST_AFTER_FAILURES = 2;
+
+      var DEMO_PHASE_LABELS = {
+        starting: 'Starting demo',
+        waiting_audit: 'Waiting for RL audit',
+        resetting_windows: 'Resetting windows',
+        clearing_queues: 'Clearing pipeline queues',
+        submitting_traffic: 'Submitting changes',
+        waiting_gate_cycles: 'Waiting for gate cycles',
+        generating_report: 'Generating report',
+        publishing: 'Publishing report',
+        done: 'Demo complete',
+        error: 'Demo failed'
+      };
+
+      function formatMmSs(sec) {
+        sec = Math.max(0, Math.floor(sec || 0));
+        var m = Math.floor(sec / 60);
+        var s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      function renderDemoWarning(panel, text) {
+        var warn = panel.querySelector('#zuul-rl-demo-warning');
+        if (!warn) {
+          return;
+        }
+        if (text) {
+          warn.textContent = '\u26a0 ' + text;
+          warn.style.display = 'block';
+        } else {
+          warn.style.display = 'none';
+          warn.textContent = '';
+        }
+      }
+
+      function checkProgressStaleness(prog) {
+        // Watchdog: warn when the demo worker stops publishing progress.
+        var panel = document.getElementById(PANEL_ID);
+        if (!panel) {
+          return;
+        }
+        if (!demoRunning || !prog) {
+          lastSeenProgressStamp = 0;
+          lastProgressChangeLocalMs = 0;
+          renderDemoWarning(panel, null);
+          return;
+        }
+        var stamp = prog.progress_updated_at || 0;
+        if (stamp !== lastSeenProgressStamp) {
+          lastSeenProgressStamp = stamp;
+          lastProgressChangeLocalMs = Date.now();
+        }
+        if (!lastProgressChangeLocalMs) {
+          lastProgressChangeLocalMs = Date.now();
+        }
+        var staleFor = (Date.now() - lastProgressChangeLocalMs) / 1000;
+        if (staleFor > STALE_PROGRESS_WARN_SEC) {
+          renderDemoWarning(panel,
+            'No progress update for ' + Math.round(staleFor) +
+            's — demo worker may be stuck (phase: ' +
+            (prog.phase || 'unknown') + ').');
+        } else {
+          renderDemoWarning(panel, null);
+        }
+      }
+
+      function renderDemoProgress(prog) {
+        var panel = document.getElementById(PANEL_ID);
+        if (!panel) {
+          return;
+        }
+        var block = panel.querySelector('#zuul-rl-demo-progress');
+        var phaseEl = panel.querySelector('#zuul-rl-demo-phase');
+        var detailEl = panel.querySelector('#zuul-rl-demo-detail');
+        var bar = panel.querySelector('#zuul-rl-demo-bar');
+        var extendBtn = panel.querySelector('#zuul-rl-extend-btn');
+        if (!block || !phaseEl || !detailEl || !bar) {
+          return;
+        }
+        if (!prog || !demoRunning) {
+          block.classList.remove('zuul-rl-demo-active');
+          bar.classList.remove('zuul-rl-demo-indeterminate');
+          bar.style.width = '0%';
+          renderDemoWarning(panel, null);
+          if (extendBtn) {
+            extendBtn.style.display = 'none';
+          }
+          return;
+        }
+        block.classList.add('zuul-rl-demo-active');
+        var phase = prog.phase || 'starting';
+        var label = DEMO_PHASE_LABELS[phase] || phase;
+        var pct = prog.percent != null ? prog.percent : 0;
+        phaseEl.textContent = label + (pct > 0 ? ' (' + pct + '%)' : '');
+        var parts = [];
+        var batchesDone = prog.batches_completed || 0;
+        var batchesPlan = prog.batches_planned || 0;
+        if (batchesPlan > 0 || batchesDone > 0) {
+          parts.push(
+            'Batch ' + batchesDone + '/' + Math.max(batchesPlan, batchesDone));
+        }
+        if (prog.changes_submitted > 0) {
+          parts.push(prog.changes_submitted + ' changes');
+        }
+        if (prog.time_remaining_s != null && prog.traffic_active) {
+          parts.push('~' + formatMmSs(prog.time_remaining_s) + ' left');
+        }
+        if (prog.failures_so_far > 0) {
+          parts.push(prog.failures_so_far + ' gate failures');
+        }
+        if (prog.extra_in_flight > 0) {
+          parts.push('+' + prog.extra_in_flight + ' extra in flight');
+        }
+        if (prog.message && parts.length < 2) {
+          parts.push(prog.message);
+        } else if (prog.message && phase === 'clearing_queues') {
+          parts = [prog.message];
+        }
+        if (prog.elapsed_s > 0 && !prog.traffic_active) {
+          parts.push(prog.elapsed_s + 's elapsed');
+        }
+        detailEl.textContent = parts.join(' \u00b7 ');
+        if (extendBtn) {
+          var showExtend = !!(prog.extend_available || prog.traffic_active ||
+            (demoRunning && phase === 'submitting_traffic'));
+          extendBtn.style.display = showExtend ? 'inline-block' : 'none';
+          extendBtn.disabled = !showExtend;
+        }
+        bar.classList.remove('zuul-rl-demo-indeterminate');
+        if (pct > 0 && pct < 100) {
+          bar.style.width = pct + '%';
+        } else if (phase === 'done') {
+          bar.style.width = '100%';
+        } else {
+          bar.classList.add('zuul-rl-demo-indeterminate');
+        }
+      }
+
+      function scheduleGridRefresh() {
+        if (gridRefreshTimer) {
+          clearInterval(gridRefreshTimer);
+        }
+        gridRefreshTimer = setInterval(
+          nudgeZuulGridRefresh,
+          demoRunning ? GRID_REFRESH_DEMO_MS : GRID_REFRESH_MS
+        );
+      }
+
+      function onDemoRunningChanged() {
+        scheduleStatusPollInterval();
+        scheduleGridRefresh();
+        if (lastStatusData) {
+          render(lastStatusData);
+        }
+      }
+
+      function startDemoPolling() {
+        demoRunning = true;
+        onDemoRunningChanged();
+        if (demoPollTimer) {
+          clearInterval(demoPollTimer);
+        }
+        if (demoLiveMetricsTimer) {
+          clearInterval(demoLiveMetricsTimer);
+        }
+        pollDemoProgress();
+        updateLiveMetrics();
+        demoPollTimer = setInterval(pollDemoProgress, DEMO_POLL_MS);
+        demoLiveMetricsTimer = setInterval(updateLiveMetrics, LIVE_POLL_MS);
+      }
+
+      function stopDemoPolling() {
+        demoRunning = false;
+        if (demoPollTimer) {
+          clearInterval(demoPollTimer);
+          demoPollTimer = null;
+        }
+        if (demoLiveMetricsTimer) {
+          clearInterval(demoLiveMetricsTimer);
+          demoLiveMetricsTimer = null;
+        }
+        renderDemoProgress(null);
+        onDemoRunningChanged();
+      }
+
+      function pollDemoProgress() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var panel = ensureReportPanel();
+        fetch(CONTROL_BASE + '/demo-progress', { cache: 'no-store' })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('demo progress unavailable');
+            }
+            return resp.json();
+          })
+          .then(function (prog) {
+            demoProgressFailStreak = 0;
+            var btn = panel.querySelector('#zuul-rl-run-btn');
+            var running = !!prog.running;
+            if (demoRunning !== running) {
+              demoRunning = running;
+              onDemoRunningChanged();
+            }
+            if (btn) {
+              btn.disabled = running;
+              btn.textContent = running ? 'Running...' : 'Run demo';
+            }
+            renderDemoProgress(prog);
+            checkProgressStaleness(prog);
+            if (!running) {
+              stopDemoPolling();
+              refreshAllParallel();
+              pollStatus();
+            }
+          })
+          .catch(function () {
+            demoProgressFailStreak += 1;
+            if (demoRunning &&
+                demoProgressFailStreak >= CONN_LOST_AFTER_FAILURES) {
+              renderDemoWarning(panel,
+                'Connection to demo controller lost — retrying\u2026 ' +
+                '(values shown may be stale)');
+            }
+          });
+      }
+
+      function scheduleChartDraw(metrics, panel) {
+        if (chartDrawPending) {
+          return;
+        }
+        chartDrawPending = true;
+        requestAnimationFrame(function () {
+          chartDrawPending = false;
+          if (!panel || !metrics) {
+            return;
+          }
+          var windowCanvas = panel.querySelector('#zuul-rl-window-chart');
+          var throughputCanvas = panel.querySelector('#zuul-rl-throughput-chart');
+          var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
+          var extraCanvas = panel.querySelector('#zuul-rl-extra-chart');
+          var failuresEl = panel.querySelector('#zuul-rl-failures');
+          var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
+          var effValueEl = panel.querySelector('#zuul-rl-efficiency-value');
+          var effDetailEl = panel.querySelector('#zuul-rl-efficiency-detail');
+          var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
+          var compareEl = panel.querySelector('#zuul-rl-comparison');
+          var status = panel.querySelector('#zuul-rl-status');
+
+          drawLineChart(windowCanvas, [
+            { color: '#06c', values: metrics.rl_window || [], label: 'RL' },
+            { color: '#f0ab00', values: metrics.tcp_window || [], label: 'TCP' }
+          ], {
+            timestamps: metrics.timestamps,
+            failures: metrics.failures,
+            ylabel: 'window size',
+            showChangeIds: true,
+            annotateWindows: true
+          });
+
+          drawLineChart(throughputCanvas, [
+            { color: '#3e8635', values: metrics.throughput || [] }
+          ], {
+            timestamps: metrics.timestamps,
+            failures: metrics.failures,
+            ylabel: 'builds/min'
+          });
+
+          var effSeries = (metrics.throughput_efficiency || []).map(function (v) {
+            return v == null ? null : v;
+          });
+          drawLineChart(efficiencyCanvas, [
+            { color: '#06c', values: effSeries }
+          ], {
+            timestamps: metrics.timestamps,
+            failures: metrics.failures,
+            ylabel: 'advantage %'
+          });
+
+          drawExtraBarChart(extraCanvas, metrics.failures || []);
+
+          var eff = formatEfficiency(metrics);
+          if (effValueEl) {
+            effValueEl.textContent = eff.text;
+            effValueEl.title = eff.tooltip || '';
+            effValueEl.className = 'zuul-rl-efficiency-value' +
+              (eff.na ? ' zuul-rl-eff-na' : '');
+          }
+          if (effDetailEl) {
+            effDetailEl.textContent = eff.detail;
+            effDetailEl.title = eff.tooltip || '';
+          }
+
+          renderFailureCounter(failCounterEl, metrics.failure_counts);
+          renderFailures(failuresEl, metrics.failures, metrics.failure_counts);
+          renderEffectivenessMetrics(effectivenessEl, metrics.effectiveness);
+          renderHighlightCards(panel, metrics);
+          renderComparisonTable(compareEl, metrics);
+          renderBenefitStory(panel, metrics);
+          renderDecisionReason(panel, metrics);
+          renderQueueSaturation(panel, metrics);
+          renderFinalSummary(panel, metrics);
+
+          if (status && metrics.latest) {
+            var latest = metrics.latest;
+            var failN = (metrics.failure_counts &&
+              metrics.failure_counts.gate_jobs_total) || 0;
+            var targetN = metrics.demo_change_count || DEMO_CHANGE_COUNT;
+            var extra = latest.extra_in_flight != null ?
+              latest.extra_in_flight :
+              (latest.changes_in_window_delta != null ?
+                latest.changes_in_window_delta :
+                Math.max(0, (latest.changes_in_window_rl || 0) -
+                  (latest.changes_in_window_tcp || 0)));
+            var adv = latest.rl_advantage_pct != null ?
+              latest.rl_advantage_pct : latest.throughput_efficiency_pct;
+            var saved = formatMinutesSaved(latest.minutes_saved);
+            var story;
+            if (failN <= 0) {
+              story = demoRunning ?
+                'Continuous demo — adaptive batches every 20s (check \u2192 Verified+1 \u2192 gate); waiting for first gate failure\u2026' :
+                'Ready — Run demo: ~5 min continuous adaptive traffic (half fail + half pass per batch). Use Extend session for more.';
+            } else if (adv != null && adv > 0) {
+              story = 'After ' + failN + ' failure' + (failN === 1 ? '' : 's') +
+                ', RL advantage ' + adv + '% — ' + extra +
+                ' extra in flight vs TCP' +
+                (latest.minutes_saved >= 0.1 ?
+                  ' (~' + saved + ' min saved est.).' : '.');
+            } else if (latest.rl_window > latest.tcp_window) {
+              story = 'After ' + failN + ' failure' + (failN === 1 ? '' : 's') +
+                ', RL holds window ' + latest.rl_window +
+                ' while TCP shrunk to ' + latest.tcp_window +
+                ' (queue ' + (latest.gate_queue_count || 0) +
+                ', extra ' + extra + ').';
+            } else {
+              story = 'Failures: ' + failN +
+                ' — RL ' + latest.rl_window + ' / TCP ' + latest.tcp_window +
+                ' (watching for RL>TCP divergence).';
+            }
+            status.textContent = story;
+            status.className = 'zuul-rl-status-line ' +
+              (demoRunning ? 'zuul-rl-status-running' : 'zuul-rl-status-live');
+          }
+        });
+      }
+
+      function renderBenefitStory(panel, metrics) {
+        var el = panel.querySelector('#zuul-rl-benefit-story');
+        if (!el) {
+          return;
+        }
+        var latest = (metrics && metrics.latest) || {};
+        var counts = (metrics && metrics.failure_counts) || {};
+        var failN = counts.gate_jobs_total || 0;
+        if (latest.rl_window == null || latest.tcp_window == null) {
+          el.style.display = 'none';
+          return;
+        }
+        var rlWin = latest.rl_window;
+        var tcpWin = latest.tcp_window;
+        var q = latest.gate_queue_count != null ? latest.gate_queue_count : 0;
+        var rlIn = latest.changes_in_window_rl != null ?
+          latest.changes_in_window_rl : Math.min(q, rlWin);
+        var tcpIn = latest.changes_in_window_tcp != null ?
+          latest.changes_in_window_tcp : Math.min(q, tcpWin);
+        var extra = latest.extra_in_flight != null ?
+          latest.extra_in_flight : Math.max(0, rlIn - tcpIn);
+        var saved = formatMinutesSaved(latest.minutes_saved);
+        var windowsDiverged = rlWin > tcpWin;
+        var html;
+        if (failN <= 0 && extra <= 0 && !windowsDiverged) {
+          if (!demoRunning) {
+            el.style.display = 'none';
+            return;
+          }
+          html = '<div class="zuul-rl-benefit-headline">RL benefit</div>' +
+            'Windows at baseline (RL ' + rlWin + ' / TCP ' + tcpWin +
+            ') — divergence appears after the first gate failure\u2026';
+        } else if (windowsDiverged && extra <= 0) {
+          // Windows differ but the queue is too shallow to show it as
+          // in-flight counts — show the window sizes, never a misleading
+          // "N vs N" when RL is actually holding a bigger window.
+          html = '<div class="zuul-rl-benefit-headline">RL benefit right now</div>' +
+            '<span class="zuul-rl-benefit-numbers">' +
+            'RL window <span class="zuul-rl-benefit-rl">' + rlWin +
+            '</span> vs TCP <span class="zuul-rl-benefit-tcp">' + tcpWin +
+            '</span> (+' + (rlWin - tcpWin) + ' capacity RL kept open)</span>' +
+            '<div>Gate queue only ' + q + ' deep — topping up traffic so ' +
+            'both windows fill; the in-flight gap will equal the window ' +
+            'gap once queue \u2265 ' + rlWin + '.</div>';
+        } else {
+          html = '<div class="zuul-rl-benefit-headline">RL benefit right now</div>' +
+            '<span class="zuul-rl-benefit-numbers">' +
+            'TCP would run <span class="zuul-rl-benefit-tcp">' + tcpIn +
+            '</span> in parallel \u2014 RL is running ' +
+            '<span class="zuul-rl-benefit-rl">' + rlIn + '</span>' +
+            (extra > 0 ? ' (<span class="zuul-rl-benefit-rl">+' + extra +
+              ' extra</span>)' : '') +
+            ' \u2192 <span class="zuul-rl-benefit-saved">~' + saved +
+            ' min saved</span> so far</span>' +
+            '<div>' + failN + ' gate failure' + (failN === 1 ? '' : 's') +
+            ' \u00b7 RL window ' + rlWin + ' vs TCP ' + tcpWin +
+            ' \u00b7 gate queue ' + q + '</div>';
+        }
+        el.innerHTML = html;
+        el.style.display = 'block';
+      }
+
+      function renderDecisionReason(panel, metrics) {
+        var el = panel.querySelector('#zuul-rl-decision-reason');
+        if (!el) {
+          return;
+        }
+        var latest = (metrics && metrics.latest) || {};
+        var reason = latest.rl_decision_reason;
+        var source = latest.rl_decision_source;
+        if (reason) {
+          el.innerHTML = '<span class="zuul-rl-reason-label">RL' +
+            (source ? ' [' + String(source)
+              .replace(/&/g, '&amp;').replace(/</g, '&lt;') + ']' : '') +
+            ':</span> ' +
+            String(reason)
+              .replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        } else {
+          el.innerHTML = '<span class="zuul-rl-reason-label">RL:</span> ' +
+            'waiting for first agent tick\u2026';
+        }
+      }
+
+      function renderQueueSaturation(panel, metrics) {
+        var el = panel.querySelector('#zuul-rl-queue-saturation');
+        if (!el) {
+          return;
+        }
+        var latest = (metrics && metrics.latest) || {};
+        var q = latest.gate_queue_count != null ? latest.gate_queue_count : null;
+        if (q == null || latest.rl_window == null) {
+          el.className = '';
+          el.textContent = 'Queue saturation: waiting for data\u2026';
+          return;
+        }
+        var maxWin = Math.max(latest.rl_window, latest.tcp_window || 0);
+        var target = latest.queue_target != null ?
+          latest.queue_target : maxWin;
+        var saturated = latest.queue_saturated != null ?
+          latest.queue_saturated : (q >= maxWin && maxWin > 0);
+        if (saturated) {
+          el.className = 'zuul-rl-sat-ok';
+          el.textContent = '\u2713 Queue saturated (' + q + ' \u2265 max ' +
+            'window ' + maxWin + ') — window comparison fully valid';
+        } else {
+          el.className = 'zuul-rl-sat-low';
+          el.textContent = '\u25f4 Queue draining (' + q + ' < target ' +
+            target + ') — topping up traffic to refill both windows';
+        }
+      }
+
+      function renderFinalSummary(panel, metrics) {
+        var el = panel.querySelector('#zuul-rl-final-summary');
+        if (!el) {
+          return;
+        }
+        var done = metrics && metrics.demo_phase === 'done' && !demoRunning;
+        if (!done) {
+          el.style.display = 'none';
+          el.innerHTML = '';
+          return;
+        }
+        var latest = metrics.latest || {};
+        var counts = metrics.failure_counts || {};
+        var adv = metrics.advantage || {};
+        var eff = metrics.effectiveness || {};
+        var failN = counts.gate_jobs_total || 0;
+        var extraTotal = adv.extra_changes_total != null ?
+          adv.extra_changes_total : 0;
+        var saved = formatMinutesSaved(
+          eff.minutes_saved != null ? eff.minutes_saved : latest.minutes_saved);
+        var advPct = adv.rl_advantage_pct != null ? adv.rl_advantage_pct : 0;
+        var merged = eff.session_changes_merged != null ?
+          eff.session_changes_merged : 0;
+        el.innerHTML =
+          '<div class="zuul-rl-final-title">\u2713 Demo complete — RL kept the ' +
+          'gate open while TCP backed off</div>' +
+          '<div class="zuul-rl-final-chips">' +
+          '<span class="zuul-rl-final-chip">' + failN +
+          ' gate failures</span>' +
+          '<span class="zuul-rl-final-chip">RL ' +
+          (latest.rl_window != null ? latest.rl_window : '?') +
+          ' vs TCP ' +
+          (latest.tcp_window != null ? latest.tcp_window : '?') +
+          ' final windows</span>' +
+          '<span class="zuul-rl-final-chip">+' + extraTotal +
+          ' extra change-slots</span>' +
+          '<span class="zuul-rl-final-chip">~' + saved +
+          ' min saved</span>' +
+          '<span class="zuul-rl-final-chip">' + advPct +
+          '% RL advantage</span>' +
+          '<span class="zuul-rl-final-chip">' + merged +
+          ' changes merged</span>' +
+          '</div>';
+        el.style.display = 'block';
+      }
+
+      function renderHighlightCards(panel, metrics) {
+        if (!panel || !metrics) {
+          return;
+        }
+        var latest = metrics.latest || {};
+        var counts = metrics.failure_counts || {};
+        var adv = metrics.advantage || {};
+        var eff = metrics.effectiveness || {};
+        var targetN = metrics.demo_change_count || DEMO_CHANGE_COUNT;
+        var failN = counts.gate_jobs_total || 0;
+        // Live extra in flight (queue-aware); fall back to session total.
+        var liveExtra = latest.extra_in_flight != null ?
+          latest.extra_in_flight :
+          (latest.changes_in_window_delta != null ?
+            latest.changes_in_window_delta :
+            (eff.changes_in_window_delta != null ?
+              eff.changes_in_window_delta : 0));
+        var sessionExtra = latest.extra_changes_total != null ?
+          latest.extra_changes_total :
+          (adv.extra_changes_total != null ? adv.extra_changes_total : 0);
+        var tips = {
+          failures: 'Gate job failures this session. Fail rule: half of each '
+            + 'batch is stamped should_fail=true (deterministic ratio, '
+            + 'adaptive batch sizes).',
+          rl: 'RL applied gate window (active). Holds through failures so it stays above TCP.',
+          tcp: 'Traditional TCP shadow window (not applied). Shrinks on gate failures.',
+          extra: 'Live Extra in flight = max(0, min(queue, RL) − min(queue, TCP)). '
+            + 'Needs gate queue deeper than TCP window. Session extras at failures: '
+            + sessionExtra + '.',
+          saved: (latest.minutes_saved_formula || eff.minutes_saved_formula ||
+            'sum(max(0, RL−TCP_after) at failures) × avg_job_duration / 60, '
+            + 'capped at session wall-clock minutes')
+        };
+        var el;
+        el = panel.querySelector('#zuul-rl-hl-failures');
+        if (el) {
+          el.textContent = failN + (targetN ? '/' + targetN : '');
+        }
+        el = panel.querySelector('#zuul-rl-hl-rl');
+        if (el) {
+          el.textContent = latest.rl_window != null ? latest.rl_window : '—';
+        }
+        el = panel.querySelector('#zuul-rl-hl-tcp');
+        if (el) {
+          el.textContent = latest.tcp_window != null ? latest.tcp_window : '—';
+        }
+        el = panel.querySelector('#zuul-rl-hl-extra');
+        if (el) {
+          el.textContent = String(liveExtra);
+        }
+        el = panel.querySelector('#zuul-rl-hl-saved');
+        if (el) {
+          el.textContent = formatMinutesSaved(latest.minutes_saved);
+        }
+        el = panel.querySelector('#zuul-rl-hl-queue');
+        if (el) {
+          var qDepth = latest.gate_queue_count != null ?
+            latest.gate_queue_count : null;
+          el.textContent = qDepth != null ? String(qDepth) : '\u2014';
+          var qCard = panel.querySelector('.zuul-rl-hl-queue');
+          if (qCard && qDepth != null && latest.rl_window != null) {
+            var qMax = Math.max(latest.rl_window, latest.tcp_window || 0);
+            var qSat = latest.queue_saturated != null ?
+              latest.queue_saturated : (qDepth >= qMax && qMax > 0);
+            qCard.classList.toggle('zuul-rl-sat-ok', !!qSat);
+            qCard.classList.toggle('zuul-rl-sat-low', !qSat);
+          }
+        }
+        el = panel.querySelector('#zuul-rl-debug-line');
+        if (el) {
+          var q = latest.gate_queue_count != null ? latest.gate_queue_count : '—';
+          el.textContent =
+            'RL ' + (latest.rl_window != null ? latest.rl_window : '—') +
+            ' · TCP ' + (latest.tcp_window != null ? latest.tcp_window : '—') +
+            ' · queue ' + q +
+            ' · extra in flight ' + liveExtra +
+            ' · in-window RL/TCP ' +
+            (latest.changes_in_window_rl != null ?
+              latest.changes_in_window_rl : '—') +
+            '/' +
+            (latest.changes_in_window_tcp != null ?
+              latest.changes_in_window_tcp : '—');
+        }
+        var card;
+        card = panel.querySelector('.zuul-rl-hl-fail');
+        if (card) { card.title = tips.failures; }
+        card = panel.querySelector('.zuul-rl-hl-rl');
+        if (card) { card.title = tips.rl; }
+        card = panel.querySelector('.zuul-rl-hl-tcp');
+        if (card) { card.title = tips.tcp; }
+        var winCards = panel.querySelectorAll('.zuul-rl-hl-win');
+        if (winCards[0]) { winCards[0].title = tips.extra; }
+        if (winCards[1]) { winCards[1].title = tips.saved; }
+        if (metrics.demo_change_count) {
+          DEMO_CHANGE_COUNT = metrics.demo_change_count;
+        }
+        if (metrics.expected_failures) {
+          DEMO_EXPECTED_FAILURES = metrics.expected_failures;
+        }
+        if (metrics.demo_batch_size) {
+          DEMO_BATCH_SIZE = metrics.demo_batch_size;
+        }
+        if (metrics.fail_per_batch) {
+          DEMO_FAIL_PER_BATCH = metrics.fail_per_batch;
+        }
+      }
+
+      function renderComparisonTable(container, metrics) {
+        if (!container) {
+          return;
+        }
+        var cmp = metrics && metrics.comparison;
+        var phase = metrics && metrics.demo_phase;
+        var show = cmp && (phase === 'done' ||
+          (metrics.failures && metrics.failures.length > 0));
+        if (!show) {
+          container.style.display = 'none';
+          container.innerHTML = '';
+          return;
+        }
+        container.style.display = 'block';
+        var html = '<div class="zuul-rl-chart-title" title="' +
+          'Side-by-side outcome if only TCP shrank vs with the RL agent.">' +
+          'Comparison after run (TCP only vs RL)</div><table><thead><tr>';
+        (cmp.columns || []).forEach(function (c) {
+          html += '<th>' + c + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+        (cmp.rows || []).forEach(function (row) {
+          html += '<tr><td>' + row.metric + '</td><td>' + row.tcp_only +
+            '</td><td>' + row.with_rl + '</td><td class="zuul-rl-benefit">' +
+            row.benefit + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        if (cmp.summary) {
+          html += '<div class="zuul-rl-compare-summary">' + cmp.summary + '</div>';
+        }
+        container.innerHTML = html;
+      }
+
+      function refreshAllParallel() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var panel = ensureReportPanel();
+        Promise.all([
+          fetch(CONTROL_BASE + '/live-metrics', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; }),
+          fetch(CONTROL_BASE + '/status', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; }),
+          fetch(CONTROL_BASE + '/demo-progress', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; })
+        ]).then(function (results) {
+          var metrics = results[0];
+          var st = results[1];
+          var prog = results[2];
+          if (metrics) {
+            lastMetrics = metrics;
+            panel.style.display = 'block';
+            scheduleChartDraw(metrics, panel);
+          }
+          if (st) {
+            var link = panel.querySelector('#zuul-rl-report-link');
+            var btn = panel.querySelector('#zuul-rl-run-btn');
+            if (btn) {
+              btn.disabled = !!st.running;
+              btn.textContent = st.running ? 'Running...' : 'Run demo';
+            }
+            if (link && st.latest_run) {
+              link.href = REPORT_BASE + '/report.html?v=' + st.latest_run;
+            }
+            if (st.running) {
+              demoRunning = true;
+            }
+          }
+          if (prog && prog.running) {
+            demoRunning = true;
+            renderDemoProgress(prog);
+          }
+        });
+      }
+
+      function formatMinutesSaved(value) {
+        if (value == null || isNaN(value)) {
+          return '0';
+        }
+        if (value < 0.1) {
+          return '<0.1';
+        }
+        return String(Math.round(value * 10) / 10);
+      }
+
+      function windowChangesNote(latest) {
+        if (!latest) {
+          return '';
+        }
+        var rl = latest.changes_in_window_rl;
+        var tcp = latest.changes_in_window_tcp;
+        if (rl == null && tcp == null) {
+          return '';
+        }
+        return ' \u00b7 RL ' + (rl != null ? rl : '?') +
+          ' in window / TCP ' + (tcp != null ? tcp : '?') + ' in window';
+      }
+
+      function renderEffectivenessMetrics(container, effectiveness) {
+        if (!container) {
+          return;
+        }
+        var eff = effectiveness || {};
+        var minutes = formatMinutesSaved(eff.minutes_saved);
+        var changeSlotSec = eff.cumulative_change_slot_seconds != null ?
+          eff.cumulative_change_slot_seconds :
+          (eff.cumulative_slot_seconds != null ? eff.cumulative_slot_seconds : 0);
+        var rlInWindow = eff.changes_in_window_rl != null ?
+          eff.changes_in_window_rl : 0;
+        var tcpInWindow = eff.changes_in_window_tcp != null ?
+          eff.changes_in_window_tcp : 0;
+        var gateQueued = eff.gate_queue_count != null ?
+          eff.gate_queue_count : 0;
+        var jobDur = eff.avg_gate_job_duration_sec != null ?
+          eff.avg_gate_job_duration_sec : 1;
+        var jobSrc = eff.job_duration_source === 'measured' ?
+          'measured from finished gate builds (success + failure)' :
+          'demo default (~1s gate job)';
+        var formula = eff.minutes_saved_formula ||
+          'sum_over_failures(max(0, RL_held \u2212 TCP_after)) \u00d7 avg_job_duration / 60, capped at session wall-clock minutes';
+        var merged = eff.session_changes_merged != null ?
+          eff.session_changes_merged : 0;
+        var mergedNote = eff.session_changes_merged_note ||
+          'Successful gate merges; expect ~5/10 pass per batch';
+        var inWindowDelta = eff.changes_in_window_delta != null ?
+          eff.changes_in_window_delta :
+          Math.max(0, rlInWindow - tcpInWindow);
+        var failures = eff.session_gate_failures != null ?
+          eff.session_gate_failures : 0;
+        var sessionMin = eff.session_duration_min != null ?
+          eff.session_duration_min : 0;
+        var impactSummary = eff.impact_summary || '';
+
+        container.innerHTML =
+          '<div class="zuul-rl-chart-title">RL effectiveness (this session)</div>' +
+          '<div class="zuul-rl-effectiveness-grid">' +
+          '<div class="zuul-rl-effectiveness-metric zuul-rl-metric-primary">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          'Serial gate-job time avoided by extra RL parallelism vs TCP shadow. ' +
+          'Formula: ' + formula + '. ' +
+          'Uses avg gate job duration (' + jobSrc + '). ' +
+          'Cumulative change-slot-seconds: ' + changeSlotSec + '.">' +
+          'Minutes saved (est.)</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + minutes + ' min</div>' +
+          '<div class="zuul-rl-effectiveness-sub">' +
+          formula + ' \u00b7 avg job ' + jobDur + 's</div></div>' +
+          (impactSummary ?
+            '<div class="zuul-rl-impact-summary">' + impactSummary + '</div>' : '') +
+          '<div class="zuul-rl-effectiveness-metric">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          'Extra gate changes running in parallel under RL vs TCP shadow ' +
+          '(changes_in_window_RL minus changes_in_window_TCP).">' +
+          'Extra changes in flight</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + inWindowDelta + '</div></div>' +
+          '<div class="zuul-rl-effectiveness-metric">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          'Live gate changes actively parallelized under the RL applied window ' +
+          '(min of gate queue depth and RL window size). Gate queue: ' +
+          gateQueued + ' change(s).">' +
+          'Changes in RL window</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + rlInWindow + '</div></div>' +
+          '<div class="zuul-rl-effectiveness-metric">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          'Gate changes that would run in parallel under the TCP shadow window ' +
+          '(min of gate queue depth and TCP window size). Gate queue: ' +
+          gateQueued + ' change(s).">' +
+          'Changes in TCP window</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + tcpInWindow + '</div></div>' +
+          '<div class="zuul-rl-effectiveness-metric">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          mergedNote + '">' +
+          'Changes merged</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + merged + '</div>' +
+          '<div class="zuul-rl-effectiveness-sub">' + mergedNote + '</div></div>' +
+          '<div class="zuul-rl-effectiveness-metric">' +
+          '<span class="zuul-rl-effectiveness-label" title="' +
+          'Gate job failures and average gate job run time this session. ' +
+          'Job duration: ' + jobSrc + '.">' +
+          'Failures / avg job</span>' +
+          '<div class="zuul-rl-effectiveness-value">' + failures +
+          ' / ' + jobDur + 's</div>' +
+          '<div class="zuul-rl-effectiveness-sub">Session ' + sessionMin + ' min</div></div>' +
+          '</div>';
+      }
+
+      function effectivenessStatusNote(metrics) {
+        var eff = metrics && (metrics.effectiveness || metrics.latest);
+        if (!eff || eff.minutes_saved == null || eff.minutes_saved < 0.1) {
+          return '';
+        }
+        return ' \u00b7 ~' + formatMinutesSaved(eff.minutes_saved) + ' min saved';
+      }
+
+      function baselineMetrics() {
+        var ts = Date.now() / 1000;
+        return {
+          timestamps: [ts],
+          rl_window: [BASELINE_WINDOW],
+          tcp_window: [BASELINE_WINDOW],
+          throughput: [0],
+          throughput_efficiency: [0],
+          failures: [],
+          effectiveness: {
+            minutes_saved: 0,
+            cumulative_slot_seconds: 0,
+            parallelism_gain: 0,
+            throughput_efficiency_pct: 0,
+            changes_in_window_rl: 0,
+            changes_in_window_tcp: 0,
+            gate_queue_count: 0,
+            avg_gate_job_duration_sec: 1,
+            session_changes_merged: 0,
+            session_gate_failures: 0,
+            session_duration_min: 0
+          },
+          latest: {
+            timestamp: ts,
+            rl_window: BASELINE_WINDOW,
+            tcp_window: BASELINE_WINDOW,
+            throughput_per_min: 0,
+            throughput_efficiency_pct: 0,
+            minutes_saved: 0,
+            parallelism_gain: 0,
+            changes_in_window_rl: 0,
+            changes_in_window_tcp: 0,
+            gate_queue_count: 0,
+            mode: null
+          }
+        };
+      }
+
+      function resetChartsToBaseline() {
+        var panel = document.getElementById(PANEL_ID);
+        if (!panel) {
+          return;
+        }
+        var metrics = baselineMetrics();
+        lastMetrics = metrics;
+
+        var windowCanvas = panel.querySelector('#zuul-rl-window-chart');
+        var throughputCanvas = panel.querySelector('#zuul-rl-throughput-chart');
+        var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
+        var failuresEl = panel.querySelector('#zuul-rl-failures');
+        var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
+        var effValueEl = panel.querySelector('#zuul-rl-efficiency-value');
+        var effDetailEl = panel.querySelector('#zuul-rl-efficiency-detail');
+        var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
+        var status = panel.querySelector('#zuul-rl-status');
+
+        drawLineChart(windowCanvas, [
+          { color: '#06c', values: metrics.rl_window },
+          { color: '#f0ab00', values: metrics.tcp_window }
+        ], {
+          timestamps: metrics.timestamps,
+          failures: [],
+          ylabel: 'window'
+        });
+
+        drawLineChart(throughputCanvas, [
+          { color: '#3e8635', values: metrics.throughput }
+        ], {
+          timestamps: metrics.timestamps,
+          failures: [],
+          ylabel: 'builds/min'
+        });
+
+        drawLineChart(efficiencyCanvas, [
+          { color: '#06c', values: metrics.throughput_efficiency }
+        ], {
+          timestamps: metrics.timestamps,
+          ylabel: '%'
+        });
+
+        if (effValueEl) {
+          effValueEl.textContent = '0%';
+          effValueEl.className = 'zuul-rl-efficiency-value';
+        }
+        if (effDetailEl) {
+          effDetailEl.textContent =
+            'RL ' + BASELINE_WINDOW + ' / TCP ' + BASELINE_WINDOW + ' (baseline)';
+        }
+        if (failuresEl) {
+          failuresEl.innerHTML = '';
+        }
+        renderFailureCounter(failCounterEl, {
+          gate_jobs_total: 0,
+          gate_cycles_total: 0,
+          tcp_shrinks_total: 0,
+          rl_shrinks_total: 0
+        });
+        renderEffectivenessMetrics(effectivenessEl, metrics.effectiveness);
+        renderHighlightCards(panel, metrics);
+        if (status) {
+          status.textContent =
+            'Demo reset — both windows at ' + BASELINE_WINDOW +
+            '. Continuous adaptive traffic for ~5 min · half of each ' +
+            'batch fails deterministically · queue kept above ' +
+            'max(RL, TCP)\u2026';
+          status.className = 'zuul-rl-status-line zuul-rl-status-running';
+        }
+      }
+
+      function tenantFromPath() {
+        var match = window.location.pathname.match(/\/t\/([^/]+)/);
+        return match ? match[1] : 'example-tenant';
+      }
+
+      function formatTime(ts) {
+        if (!ts) {
+          return '?';
+        }
+        return new Date(ts * 1000).toLocaleTimeString();
+      }
+
+      function formatQueue(q, mode) {
+        var tcp = q.tcp_shadow_window != null ? q.tcp_shadow_window : '?';
+        var rl = q.current_window != null ? q.current_window : '?';
+        var delta = q.action_delta;
+        var deltaStr = delta == null ? '' :
+          ' (agent ' + (delta >= 0 ? '+' : '') + delta + ')';
+        var modeNote = mode === 'shadow' ?
+          'shadow mode — RL recommends only' : 'active — RL window applied';
+        return q.name + ': <span class="zuul-rl-active">RL active window ' + rl +
+          '</span> (applied now) · <span class="zuul-rl-tcp">TCP baseline ' + tcp +
+          '</span> (shadow, not applied) · ' + modeNote + deltaStr;
+      }
+
+      function formatFailureCounts(counts) {
+        if (!counts) {
+          return {
+            line: 'Gate failures: 0 (half of each batch fails ' +
+              'deterministically)',
+            short: '',
+            hasFailures: false
+          };
+        }
+        var jobs = counts.gate_jobs_total || 0;
+        var cycles = counts.gate_cycles_total || 0;
+        var tcpShrinks = counts.tcp_shrinks_total || 0;
+        var rlShrinks = counts.rl_shrinks_total || 0;
+        var sinceTcp = counts.gate_cycles_since_tcp_shrink;
+        var sinceRl = counts.gate_jobs_since_rl_shrink;
+        var line = 'Gate failures: ' + jobs +
+          ' · ' + cycles + ' gate cycle' +
+          (cycles === 1 ? '' : 's');
+        line += ' · TCP shrinks ' + tcpShrinks + ' · RL shrinks ' + rlShrinks;
+        if (cycles > 0 && sinceTcp != null) {
+          line += ' · <span class="zuul-rl-fail-tcp">' + sinceTcp +
+            ' cycle failure' + (sinceTcp === 1 ? '' : 's') +
+            ' since last TCP shrink</span>';
+        }
+        if (jobs > 0 && sinceRl != null) {
+          line += ' · <span class="zuul-rl-fail-rl">' + sinceRl +
+            ' job failure' + (sinceRl === 1 ? '' : 's') +
+            ' since last RL shrink</span>';
+        }
+        var short = jobs + ' failures';
+        return {
+          line: line,
+          short: short,
+          hasFailures: jobs > 0 || cycles > 0
+        };
+      }
+
+      function renderFailureCounter(container, counts) {
+        if (!container) {
+          return;
+        }
+        var fmt = formatFailureCounts(counts);
+        container.innerHTML = fmt.line;
+        container.className = 'zuul-rl-failure-counter' +
+          (fmt.hasFailures ? ' zuul-rl-has-failures' : '');
+      }
+
+      function failureStatusNote(counts) {
+        var fmt = formatFailureCounts(counts);
+        return fmt.hasFailures ? ' · ' + fmt.short : '';
+      }
+
+      function formatEfficiency(metrics) {
+        var latest = metrics && metrics.latest;
+        var adv = (metrics && metrics.advantage) || {};
+        var eff = (metrics && metrics.effectiveness) || {};
+        if (!latest) {
+          return {
+            text: '0%',
+            detail: 'RL ' + BASELINE_WINDOW + ' / TCP ' + BASELINE_WINDOW +
+              ' (baseline)',
+            tooltip: 'Advantage appears after gate failures when RL holds a higher window than TCP.',
+            na: false
+          };
+        }
+        var pct = latest.rl_advantage_pct;
+        if (pct == null) {
+          pct = latest.throughput_efficiency_pct;
+        }
+        if (pct == null) {
+          pct = adv.rl_advantage_pct;
+        }
+        if (pct == null) {
+          pct = eff.rl_advantage_pct;
+        }
+        var totalExtra = latest.extra_changes_total != null ?
+          latest.extra_changes_total :
+          (adv.extra_changes_total != null ? adv.extra_changes_total : 0);
+        var formula = adv.advantage_formula ||
+          'sum(extra at failures) / sum(TCP at failures) × 100';
+        var source = adv.advantage_source || '';
+        var tooltip = formula +
+          (source ? ' [source: ' + source + ']' : '') +
+          '. Extra change-slots this session: ' + totalExtra + '.';
+        if (pct == null) {
+          return {
+            text: 'N/A',
+            detail: 'Waiting for gate failures to measure advantage',
+            tooltip: tooltip,
+            na: true
+          };
+        }
+        var detail = pct + '% session advantage · ' + totalExtra +
+          ' extra change-slot' + (totalExtra === 1 ? '' : 's') +
+          ' across failures';
+        if (latest.rl_window != null && latest.tcp_window != null) {
+          detail += ' · live RL ' + latest.rl_window +
+            ' / TCP ' + latest.tcp_window;
+        }
+        return {
+          text: pct + '%',
+          detail: detail,
+          tooltip: tooltip,
+          na: false
+        };
+      }
+
+      function ensureBanner() {
+        var banner = document.getElementById(BANNER_ID);
+        if (banner) {
+          return banner;
+        }
+        banner = document.createElement('div');
+        banner.id = BANNER_ID;
+        banner.style.display = 'none';
+        return banner;
+      }
+
+      function placeBanner(banner) {
+        banner.style.position = 'fixed';
+        banner.style.top = '110px';
+        banner.style.left = '0';
+        banner.style.right = '0';
+        banner.style.zIndex = '10000';
+        if (banner.parentNode !== document.body) {
+          document.body.insertBefore(banner, document.body.firstChild);
+        }
+      }
+
+      function setPanelMinimized(panel, minimized) {
+        if (!panel) {
+          return;
+        }
+        panel.classList.toggle('zuul-rl-minimized', minimized);
+        var btn = panel.querySelector('#zuul-rl-minimize-btn');
+        if (btn) {
+          btn.textContent = minimized ? '+' : '\u2212';
+          btn.title = minimized ? 'Expand panel' : 'Minimize panel';
+        }
+        try {
+          sessionStorage.setItem('zuul-rl-panel-minimized', minimized ? '1' : '0');
+        } catch (e) {}
+      }
+
+      function togglePanelMinimized() {
+        var panel = document.getElementById(PANEL_ID);
+        if (!panel) {
+          return;
+        }
+        setPanelMinimized(panel, !panel.classList.contains('zuul-rl-minimized'));
+      }
+
+      function ensureReportPanel() {
+        var panel = document.getElementById(PANEL_ID);
+        if (panel) {
+          if (panel.getAttribute('data-layout') === PANEL_LAYOUT_VERSION) {
+            return panel;
+          }
+          // Older layout from a previous script version — rebuild fresh.
+          panel.remove();
+          panel = null;
+        }
+        panel = document.createElement('div');
+        panel.id = PANEL_ID;
+        panel.setAttribute('data-layout', PANEL_LAYOUT_VERSION);
+        function section(num, title, tip, bodyHtml) {
+          return '<div class="zuul-rl-section">' +
+            '<div class="zuul-rl-section-title"' +
+            (tip ? ' title="' + tip + '"' : '') + '>' +
+            '<span class="zuul-rl-section-num">' + num + '</span>' +
+            title + '</div>' +
+            '<div class="zuul-rl-section-body">' + bodyHtml + '</div></div>';
+        }
+        panel.innerHTML =
+          '<div class="header">' +
+          '<span class="header-title">RL vs Traditional TCP Window — Live Comparison</span>' +
+          '<span class="header-actions">' +
+          '<button id="zuul-rl-minimize-btn" type="button" title="Minimize panel">\u2212</button>' +
+          '<a id="zuul-rl-report-link" target="_blank" href="' +
+          REPORT_BASE + '/report.html">report</a></span></div>' +
+          '<div id="zuul-rl-report-body">' +
+
+          // 1. Demo Control — buttons, phase, progress bar, warnings.
+          section(1, 'Demo Control',
+            'Start or extend the demo; live phase and progress below.',
+            '<div class="zuul-rl-control-buttons">' +
+            '<button id="zuul-rl-run-btn" type="button">Run demo</button>' +
+            '<button id="zuul-rl-extend-btn" type="button" title="Add 1 more batch of changes (does not cancel in-flight builds)" style="display:none">Extend session</button>' +
+            '</div>' +
+            '<div id="zuul-rl-demo-progress">' +
+            '<div id="zuul-rl-demo-phase">Starting demo\u2026</div>' +
+            '<div id="zuul-rl-demo-detail"></div>' +
+            '<div id="zuul-rl-demo-bar-wrap"><div id="zuul-rl-demo-bar"></div></div>' +
+            '<div id="zuul-rl-demo-warning"></div>' +
+            '</div>' +
+            '<div id="zuul-rl-status" class="zuul-rl-status-line">' +
+            'Waiting for live metrics\u2026 Click Run demo for a ~5-minute continuous traffic session (adaptive batches; half fail + half pass; check \u2192 Verified+1 \u2192 gate).</div>') +
+
+          // 2. Live Comparison — headline story, key numbers, saturation.
+          section(2, 'Live Comparison',
+            'The headline: how many changes each strategy runs in parallel right now.',
+            '<div id="zuul-rl-benefit-story"></div>' +
+            '<div id="zuul-rl-highlights" class="zuul-rl-highlight-grid">' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-rl" title="RL applied gate window (active)">' +
+            '<div class="zuul-rl-hl-label">RL window</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-rl">8</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-tcp" title="TCP shadow window (shrinks on failure)">' +
+            '<div class="zuul-rl-hl-label">TCP window</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-tcp">8</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-queue" title="Gate queue depth vs saturation target max(RL, TCP) + margin">' +
+            '<div class="zuul-rl-hl-label">Gate queue</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-queue">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-fail" title="Gate failures this session">' +
+            '<div class="zuul-rl-hl-label">Failures</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-failures">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-win" title="Live extra = max(0, min(queue,RL) − min(queue,TCP))">' +
+            '<div class="zuul-rl-hl-label">Extra in flight</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-extra">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-win" title="Discrete per-failure estimate, capped at session wall-clock">' +
+            '<div class="zuul-rl-hl-label">Min saved (est.)</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-saved">0</div></div>' +
+            '</div>' +
+            '<div id="zuul-rl-queue-saturation">Queue saturation: waiting for data\u2026</div>' +
+            '<div id="zuul-rl-debug-line" class="zuul-rl-efficiency-formula" title="Live RL / TCP / queue / extra for debugging">' +
+            'RL — · TCP — · queue — · extra in flight —</div>') +
+
+          // 3. Why — last RL decision reason from the audit stream.
+          section(3, 'Why (RL decision)',
+            'Human-readable reason for the RL agent\u2019s last window decision.',
+            '<div id="zuul-rl-decision-reason">' +
+            '<span class="zuul-rl-reason-label">RL:</span> ' +
+            'waiting for first agent tick\u2026</div>') +
+
+          // 4. Charts — windows over time, advantage, extras, throughput.
+          section(4, 'Charts',
+            'Window sizes over time, per-failure extras and gate throughput.',
+            '<div class="zuul-rl-chart-wrap">' +
+            '<div class="zuul-rl-chart-title" title="RL applied window vs TCP shadow over time. Red markers = gate failures.">' +
+            'RL vs TCP window over time</div>' +
+            '<canvas id="zuul-rl-window-chart" class="zuul-rl-chart" width="440" height="140"></canvas>' +
+            '<div class="zuul-rl-legend">' +
+            '<span><span class="swatch" style="background:#06c"></span>RL (applied)</span>' +
+            '<span><span class="swatch" style="background:#f0ab00"></span>TCP (shadow)</span>' +
+            '<span><span class="swatch" style="background:#c9190b;height:8px;width:2px"></span>gate failure + change id</span>' +
+            '<span><span class="swatch" style="background:#c46100"></span>\u25bc TCP drop</span>' +
+            '<span><span class="swatch" style="background:#06c;border-radius:50%;width:6px;height:6px"></span>RL held</span>' +
+            '</div>' +
+            '<div class="zuul-rl-chart-axis">Y = window size · X = time · divergence after failures shows RL advantage</div>' +
+            '</div>' +
+            '<div class="zuul-rl-efficiency-block" title="Session advantage: sum(extra at failures) / sum(TCP at failures) × 100">' +
+            '<div class="zuul-rl-chart-title">RL advantage vs TCP (%)</div>' +
+            '<div class="zuul-rl-efficiency-formula">' +
+            'sum(extra change-slots at failures) / sum(TCP window at failures) \u00d7 100</div>' +
+            '<div id="zuul-rl-efficiency-value" class="zuul-rl-efficiency-value">0%</div>' +
+            '<div id="zuul-rl-efficiency-detail" class="zuul-rl-efficiency-formula"></div>' +
+            '<canvas id="zuul-rl-efficiency-chart" width="440" height="56"></canvas>' +
+            '</div>' +
+            '<div class="zuul-rl-chart-wrap">' +
+            '<div class="zuul-rl-chart-title" title="Extra parallel slots RL kept vs TCP at each gate failure.">' +
+            'Extra changes accommodated per failure</div>' +
+            '<canvas id="zuul-rl-extra-chart" width="440" height="90"></canvas>' +
+            '<div class="zuul-rl-legend">' +
+            '<span><span class="swatch" style="background:#06c;height:8px"></span>extra = RL − TCP at failure</span>' +
+            '</div></div>' +
+            '<div class="zuul-rl-chart-wrap">' +
+            '<div class="zuul-rl-chart-title" title="Completed gate builds per minute during the session.">' +
+            'Gate throughput (builds / min)</div>' +
+            '<canvas id="zuul-rl-throughput-chart" class="zuul-rl-chart" width="440" height="110"></canvas>' +
+            '<div class="zuul-rl-legend">' +
+            '<span><span class="swatch" style="background:#3e8635"></span>completed gate builds</span>' +
+            '</div></div>') +
+
+          // 5. Failures — counter plus per-failure impact list.
+          section(5, 'Failures',
+            'Every gate failure: which change failed, how TCP shrank, how RL held.',
+            '<div id="zuul-rl-failure-counter" class="zuul-rl-failure-counter" title="Gate job failures (half of each batch fails deterministically)">' +
+            'Gate failures: 0 (half of each batch fails deterministically)</div>' +
+            '<div id="zuul-rl-failures" class="zuul-rl-failures"></div>') +
+
+          // 6. Session Summary / Savings — totals + end-of-run card.
+          section(6, 'Session Summary / Savings',
+            'Session totals: minutes saved, merges, comparison after the run.',
+            '<div id="zuul-rl-final-summary"></div>' +
+            '<div id="zuul-rl-effectiveness" class="zuul-rl-effectiveness-block"></div>' +
+            '<div id="zuul-rl-comparison" class="zuul-rl-compare-block" style="display:none"></div>') +
+
+          '</div>';
+        var runBtn = panel.querySelector('#zuul-rl-run-btn');
+        if (runBtn) {
+          runBtn.addEventListener('click', triggerDemo);
+        }
+        var extendBtn = panel.querySelector('#zuul-rl-extend-btn');
+        if (extendBtn) {
+          extendBtn.addEventListener('click', triggerExtendDemo);
+        }
+        var minBtn = panel.querySelector('#zuul-rl-minimize-btn');
+        if (minBtn) {
+          minBtn.addEventListener('click', togglePanelMinimized);
+        }
+        try {
+          if (sessionStorage.getItem('zuul-rl-panel-minimized') === '1') {
+            setPanelMinimized(panel, true);
+          }
+        } catch (e) {}
+        document.body.appendChild(panel);
+        return panel;
+      }
+
+      function triggerExtendDemo() {
+        var panel = ensureReportPanel();
+        var btn = panel.querySelector('#zuul-rl-extend-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Extending\u2026';
+        }
+        fetch(CONTROL_BASE + '/extend-demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batches: 1 })
+        })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('extend-demo failed');
+            }
+            return resp.json();
+          })
+          .then(function (data) {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Extend session';
+            }
+            var status = panel.querySelector('#zuul-rl-status');
+            if (status) {
+              status.textContent = data.message ||
+                ('Extended by ' + (data.batches_added || 1) +
+                  ' batch(es) — in-flight builds continue.');
+              status.className = 'zuul-rl-status-line zuul-rl-status-running';
+            }
+            pollDemoProgress();
+          })
+          .catch(function () {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Extend session';
+            }
+            var status = panel.querySelector('#zuul-rl-status');
+            if (status) {
+              status.textContent =
+                'Extend failed — is a continuous demo session running?';
+              status.className = 'zuul-rl-status-line zuul-rl-status-error';
+            }
+          });
+      }
+
+      function triggerDemo() {
+        var panel = ensureReportPanel();
+        var btn = panel.querySelector('#zuul-rl-run-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Starting...';
+        }
+        resetChartsToBaseline();
+        startDemoPolling();
+        renderDemoProgress({
+          phase: 'starting',
+          message: 'Sending run-demo request\u2026',
+          percent: 1
+        });
+        fetch(CONTROL_BASE + '/run-demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('run-demo failed');
+            }
+            return resp.json();
+          })
+          .then(function (data) {
+            renderDemoProgress({
+              phase: data.phase || 'starting',
+              message: data.message || 'Demo started',
+              percent: 2,
+              extend_available: true
+            });
+            refreshAllParallel();
+          })
+          .catch(function () {
+            stopDemoPolling();
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Run demo';
+            }
+            var status = panel.querySelector('#zuul-rl-status');
+            if (status) {
+              status.textContent = 'Failed to start demo \u2014 is rl-control running?';
+              status.className = 'zuul-rl-status-line zuul-rl-status-error';
+            }
+          });
+      }
+
+      function drawLineChart(canvas, series, options) {
+        if (!canvas || !series || !series.length) {
+          return;
+        }
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width;
+        var h = canvas.height;
+        var pad = { top: 12, right: 10, bottom: 22, left: 32 };
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#fafafa';
+        ctx.fillRect(0, 0, w, h);
+
+        var allY = [];
+        series.forEach(function (s) {
+          (s.values || []).forEach(function (v) {
+            if (v != null && !isNaN(v)) {
+              allY.push(v);
+            }
+          });
+        });
+        if (!allY.length) {
+          ctx.fillStyle = '#6a6e73';
+          ctx.font = '11px sans-serif';
+          ctx.fillText('Waiting for agent ticks\u2026', pad.left, h / 2);
+          return;
+        }
+
+        var minY = Math.min.apply(null, allY);
+        var maxY = Math.max.apply(null, allY);
+        if (options && options.ylabel &&
+            options.ylabel.indexOf('window') === 0) {
+          minY = Math.max(1, minY - 1);
+          maxY = Math.min(50, maxY + 1);
+          if (maxY - minY < 4) {
+            var mid = (minY + maxY) / 2;
+            minY = Math.max(1, mid - 2);
+            maxY = Math.min(50, mid + 2);
+          }
+        } else if (minY === maxY) {
+          minY -= 1;
+          maxY += 1;
+        }
+        var plotW = w - pad.left - pad.right;
+        var plotH = h - pad.top - pad.bottom;
+        var n = series[0].values.length;
+        var xAt = function (i) {
+          return pad.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+        };
+        var yAt = function (v) {
+          return pad.top + plotH - ((v - minY) / (maxY - minY)) * plotH;
+        };
+
+        ctx.strokeStyle = '#d2d2d2';
+        ctx.lineWidth = 1;
+        for (var g = 0; g <= 3; g++) {
+          var gy = pad.top + (g / 3) * plotH;
+          ctx.beginPath();
+          ctx.moveTo(pad.left, gy);
+          ctx.lineTo(w - pad.right, gy);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = '#6a6e73';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(Math.round(maxY), pad.left - 4, pad.top + 4);
+        ctx.fillText(Math.round(minY), pad.left - 4, pad.top + plotH);
+
+        if (options && options.timestamps && options.timestamps.length) {
+          ctx.textAlign = 'center';
+          var t0 = options.timestamps[0];
+          var tN = options.timestamps[options.timestamps.length - 1];
+          ctx.fillText(formatTime(t0), pad.left, h - 6);
+          ctx.fillText(formatTime(tN), w - pad.right, h - 6);
+        }
+
+        if (options && options.failures && options.timestamps) {
+          options.failures.forEach(function (fail) {
+            var idx = 0;
+            var best = Infinity;
+            for (var fi = 0; fi < options.timestamps.length; fi++) {
+              var d = Math.abs(options.timestamps[fi] - fail.timestamp);
+              if (d < best) {
+                best = d;
+                idx = fi;
+              }
+            }
+            var fx = xAt(idx);
+            ctx.strokeStyle = '#c9190b';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(fx, pad.top);
+            ctx.lineTo(fx, pad.top + plotH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            if (fail.session_index != null) {
+              ctx.fillStyle = '#c9190b';
+              ctx.font = 'bold 9px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText('#' + fail.session_index, fx, pad.top + 10);
+            }
+            if (options.showChangeIds && fail.change) {
+              var cid = String(fail.change);
+              // Prefer bare change number when "project N,ps"
+              var m = cid.match(/(\d+)(?:,\d+)?$/);
+              var shortId = m ? m[1] : cid.slice(0, 8);
+              ctx.fillStyle = '#a30000';
+              ctx.font = '8px sans-serif';
+              ctx.fillText(shortId, fx, pad.top + plotH - 2);
+            }
+          });
+        }
+
+        series.forEach(function (s) {
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          var started = false;
+          for (var i = 0; i < s.values.length; i++) {
+            var v = s.values[i];
+            if (v == null || isNaN(v)) {
+              started = false;
+              continue;
+            }
+            var x = xAt(i);
+            var y = yAt(v);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+        });
+
+        // Per-failure annotation: amber down-arrow where TCP dropped,
+        // blue dot where RL held — makes the divergence story explicit.
+        if (options && options.annotateWindows && options.failures &&
+            options.timestamps && series.length >= 2) {
+          options.failures.forEach(function (fail) {
+            var idx = 0;
+            var best = Infinity;
+            for (var fi = 0; fi < options.timestamps.length; fi++) {
+              var d = Math.abs(options.timestamps[fi] - fail.timestamp);
+              if (d < best) {
+                best = d;
+                idx = fi;
+              }
+            }
+            var fx = xAt(idx);
+            var rlV = series[0].values[idx];
+            var tcpV = series[1].values[idx];
+            if (tcpV != null && !isNaN(tcpV)) {
+              var ty = yAt(tcpV);
+              ctx.fillStyle = '#c46100';
+              ctx.beginPath();
+              ctx.moveTo(fx - 4, ty - 7);
+              ctx.lineTo(fx + 4, ty - 7);
+              ctx.lineTo(fx, ty - 1);
+              ctx.closePath();
+              ctx.fill();
+            }
+            if (rlV != null && !isNaN(rlV)) {
+              var ry = yAt(rlV);
+              ctx.fillStyle = '#06c';
+              ctx.beginPath();
+              ctx.arc(fx, ry, 2.6, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+        }
+
+        if (options && options.ylabel) {
+          ctx.save();
+          ctx.translate(10, pad.top + plotH / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillStyle = '#6a6e73';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(options.ylabel, 0, 0);
+          ctx.restore();
+        }
+      }
+
+      function drawExtraBarChart(canvas, failures) {
+        if (!canvas) {
+          return;
+        }
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width;
+        var h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#fafafa';
+        ctx.fillRect(0, 0, w, h);
+        var pad = { top: 14, right: 8, bottom: 22, left: 28 };
+        if (!failures || !failures.length) {
+          ctx.fillStyle = '#6a6e73';
+          ctx.font = '11px sans-serif';
+          ctx.fillText('Extra slots appear at each gate failure\u2026', pad.left, h / 2);
+          return;
+        }
+        var vals = failures.map(function (f) {
+          return f.extra_changes != null ? f.extra_changes :
+            (f.changes_in_window_delta != null ? f.changes_in_window_delta : 0);
+        });
+        var maxY = Math.max(1, Math.max.apply(null, vals));
+        var plotW = w - pad.left - pad.right;
+        var plotH = h - pad.top - pad.bottom;
+        var barW = Math.max(8, (plotW / vals.length) * 0.6);
+        ctx.fillStyle = '#6a6e73';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(String(maxY), pad.left - 4, pad.top + 4);
+        ctx.fillText('0', pad.left - 4, pad.top + plotH);
+        vals.forEach(function (v, i) {
+          var x = pad.left + ((i + 0.5) / vals.length) * plotW - barW / 2;
+          var bh = (v / maxY) * plotH;
+          var y = pad.top + plotH - bh;
+          ctx.fillStyle = v > 0 ? '#06c' : '#d2d2d2';
+          ctx.fillRect(x, y, barW, Math.max(bh, v > 0 ? 2 : 0));
+          ctx.fillStyle = '#151515';
+          ctx.font = '9px sans-serif';
+          ctx.textAlign = 'center';
+          var label = failures[i].change ?
+            String(failures[i].change).replace(/^.*\s/, '').split(',')[0] :
+            '#' + (failures[i].session_index || (i + 1));
+          ctx.fillText(label, x + barW / 2, h - 6);
+          if (v > 0) {
+            ctx.fillStyle = '#06c';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.fillText('+' + v, x + barW / 2, y - 2);
+          }
+        });
+      }
+
+      function renderFailures(container, failures, failureCounts) {
+        if (!container) {
+          return;
+        }
+        if (!failures || !failures.length) {
+          container.innerHTML = '';
+          return;
+        }
+        var total = failureCounts && failureCounts.gate_jobs_total != null ?
+          failureCounts.gate_jobs_total : failures.length;
+        var html = '<strong>' + total + ' gate failure' +
+          (total === 1 ? '' : 's') + ' this session</strong>';
+        failures.slice().reverse().forEach(function (f) {
+          var tip = '';
+          if (f.extra_changes != null) {
+            tip = ' title="Extra changes at this failure: ' + f.extra_changes +
+              ' (RL ' + (f.rl_window != null ? f.rl_window : '?') +
+              ' − TCP ' +
+              (f.tcp_window_after != null ? f.tcp_window_after :
+                (f.tcp_window != null ? f.tcp_window : '?')) + ')"';
+          }
+          if (f.impact_text) {
+            html += '<div class="zuul-rl-failure-row"' + tip + '>' +
+              f.impact_text + '</div>';
+            return;
+          }
+          var rl = f.rl_window != null ? f.rl_window : '?';
+          var change = f.change || 'unknown';
+          var extra = f.extra_changes != null ? f.extra_changes : 0;
+          if (f.tcp_window_before != null && f.tcp_window_after != null) {
+            html += '<div class="zuul-rl-failure-row"' + tip + '>Change ' +
+              change + ' failed → TCP shrunk ' + f.tcp_window_before + '→' +
+              f.tcp_window_after + '; RL held ' + rl +
+              (extra > 0 ? ' (+' + extra + ' extra)' : '') + '</div>';
+          } else {
+            html += '<div class="zuul-rl-failure-row"' + tip + '>Change ' +
+              change + ' failed → RL ' + rl + ' / TCP ' +
+              (f.tcp_window != null ? f.tcp_window : '?') + '</div>';
+          }
+        });
+        container.innerHTML = html;
+      }
+
+      function updateLiveMetrics() {
+        if (!window.location.pathname.includes('/status')) {
+          var existing = document.getElementById(PANEL_ID);
+          if (existing) {
+            existing.style.display = 'none';
+          }
+          return;
+        }
+        if (metricsInFlight) {
+          return;
+        }
+        metricsInFlight = true;
+        var panel = ensureReportPanel();
+        fetch(CONTROL_BASE + '/live-metrics', { cache: 'no-store' })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('live metrics unavailable');
+            }
+            return resp.json();
+          })
+          .then(function (metrics) {
+            liveMetricsFailStreak = 0;
+            lastMetrics = metrics;
+            panel.style.display = 'block';
+            scheduleChartDraw(metrics, panel);
+          })
+          .catch(function () {
+            liveMetricsFailStreak += 1;
+            var panel = document.getElementById(PANEL_ID);
+            if (panel) {
+              panel.style.display = 'block';
+              var status = panel.querySelector('#zuul-rl-status');
+              if (status &&
+                  liveMetricsFailStreak >= CONN_LOST_AFTER_FAILURES) {
+                status.textContent = demoRunning ?
+                  'Connection lost \u2014 retrying\u2026 charts show last ' +
+                  'known values.' :
+                  'Live monitor offline \u2014 start rl-control on port 19100.';
+                status.className = 'zuul-rl-status-line zuul-rl-status-error';
+              }
+            }
+          })
+          .finally(function () {
+            metricsInFlight = false;
+          });
+      }
+
+      function updateReportPanel() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var panel = ensureReportPanel();
+        fetch(CONTROL_BASE + '/status', { cache: 'no-store' })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('control service unavailable');
+            }
+            return resp.json();
+          })
+          .then(function (st) {
+            var link = panel.querySelector('#zuul-rl-report-link');
+            var status = panel.querySelector('#zuul-rl-status');
+            var btn = panel.querySelector('#zuul-rl-run-btn');
+            if (btn) {
+              btn.disabled = !!st.running;
+              btn.textContent = st.running ? 'Running...' : 'Run demo';
+            }
+            if (status) {
+              status.className = 'zuul-rl-status-line';
+              if (st.running || demoRunning) {
+                if (!demoRunning) {
+                  startDemoPolling();
+                }
+                if (st.demo_progress) {
+                  renderDemoProgress(st.demo_progress);
+                }
+                if (st.effectiveness) {
+                  var effectivenessEl = panel.querySelector(
+                    '#zuul-rl-effectiveness');
+                  renderEffectivenessMetrics(effectivenessEl, st.effectiveness);
+                }
+                if (!lastMetrics || !demoRunning) {
+                  status.textContent =
+                    'Demo scenario running \u2014 see progress above; graphs update live.';
+                  status.className += ' zuul-rl-status-running';
+                }
+              } else if (st.last_error) {
+                status.textContent = 'Last demo run failed: ' + st.last_error;
+                status.className += ' zuul-rl-status-error';
+              } else if (st.latest && st.latest.rl_window != null) {
+                var latest = st.latest;
+                var failNote = failureStatusNote(st.failure_counts);
+                var windowNote = windowChangesNote(latest);
+                var savedNote = effectivenessStatusNote(st);
+                status.textContent =
+                  'Live — RL active window ' + latest.rl_window +
+                  ' (applied), TCP baseline ' + latest.tcp_window +
+                  ' (shadow), throughput ' + latest.throughput_per_min + '/min' +
+                  windowNote + savedNote + failNote;
+                status.className += ' zuul-rl-status-live';
+                var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
+                renderFailureCounter(failCounterEl, st.failure_counts);
+                var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
+                renderEffectivenessMetrics(effectivenessEl, st.effectiveness);
+              } else if (st.latest_run) {
+                status.textContent =
+                  'Idle \u2014 latest report ' + st.latest_run +
+                  ' (graphs still refresh from live audit data).';
+              } else {
+                status.textContent =
+                  'Live \u2014 waiting for RL agent ticks and gate traffic.';
+                status.className += ' zuul-rl-status-live';
+              }
+            }
+            if (link && st.latest_run) {
+              link.href = REPORT_BASE + '/report.html?v=' + st.latest_run;
+            }
+            panel.style.display = 'block';
+          })
+          .catch(function () {});
+      }
+
+      function render(data) {
+        if (!window.location.pathname.includes('/status')) {
+          var existing = document.getElementById(BANNER_ID);
+          if (existing) {
+            existing.style.display = 'none';
+          }
+          return;
+        }
+
+        var banner = ensureBanner();
+        placeBanner(banner);
+
+        if (demoRunning) {
+          banner.style.display = 'block';
+          banner.innerHTML =
+            '<span class="zuul-rl-banner-title">RL demo in progress</span> ' +
+            '<span class="zuul-rl-mode">Watch the progress panel (bottom-right): ' +
+            'clearing queues \u2192 check \u2192 Verified+1 \u2192 gate \u2192 processing. ' +
+            'Gate cards show one <strong>RL</strong> + one <strong>TCP</strong> summary each.</span>';
+          return;
+        }
+
+        var parts = [];
+        (data.pipelines || []).forEach(function (pipeline) {
+          var rl = pipeline.rl_window;
+          if (!rl || !rl.queues || !rl.queues.length) {
+            return;
+          }
+          var q = rl.queues[0];
+          var rlWin = q.current_window != null ? q.current_window : '?';
+          var tcpWin = q.tcp_shadow_window != null ? q.tcp_shadow_window : '?';
+          parts.push('<strong>' + pipeline.name + '</strong> ' +
+            '<span class="zuul-rl-active">RL ' + rlWin + '</span> ' +
+            '<span class="zuul-rl-tcp">TCP ' + tcpWin + '</span>');
+        });
+
+        if (!parts.length) {
+          banner.style.display = 'none';
+          return;
+        }
+        banner.style.display = 'block';
+        var gate = (data.pipelines || []).find(function (p) {
+          return p.name === 'gate';
+        });
+        var mode = gate && gate.rl_window ? gate.rl_window.mode : 'active';
+        var modeLine = mode === 'shadow' ?
+          'Shadow mode — TCP baseline still governs Zuul.' :
+          'Active mode — RL window applied to gate.';
+        banner.innerHTML =
+          '<span class="zuul-rl-banner-title">' +
+          'RL vs Traditional TCP Window — Live Comparison</span> ' +
+          '<span class="zuul-rl-mode">' + modeLine +
+          ' Blue = RL (applied). Amber = TCP shadow baseline.</span> &nbsp;|&nbsp; ' +
+          parts.join(' &nbsp;|&nbsp; ');
+      }
+
+      function removeStrayQueueBadges() {
+        document.querySelectorAll('.zuul-rl-queue-badge').forEach(function (badge) {
+          if (!badge.closest('.zuul-pipeline-summary')) {
+            badge.remove();
+          }
+        });
+      }
+
+      function enhanceBadges(data) {
+        removeStrayQueueBadges();
+        (data.pipelines || []).forEach(function (pipeline) {
+          var rl = pipeline.rl_window;
+          if (!rl || !rl.queues || !rl.queues.length) {
+            return;
+          }
+          var q = rl.queues[0];
+          var rlWin = q.current_window != null ? q.current_window : '?';
+          var tcpWin = q.tcp_shadow_window != null ? q.tcp_shadow_window : '?';
+
+          document.querySelectorAll('.zuul-pipeline-summary').forEach(function (card) {
+            var link = card.querySelector('a.zuul-pipeline-link');
+            if (!link || link.textContent.trim() !== pipeline.name) {
+              return;
+            }
+            var rlTag = card.querySelector('.zuul-rl-queue-badge.zuul-rl-badge-active');
+            if (!rlTag) {
+              rlTag = document.createElement('span');
+              rlTag.className = 'zuul-rl-queue-badge zuul-rl-badge-active';
+              link.insertAdjacentElement('afterend', rlTag);
+            }
+            rlTag.textContent = 'RL ' + rlWin;
+
+            var tcpTag = card.querySelector('.zuul-rl-queue-badge.zuul-rl-badge-tcp');
+            if (!tcpTag) {
+              tcpTag = document.createElement('span');
+              tcpTag.className = 'zuul-rl-queue-badge zuul-rl-badge-tcp';
+              rlTag.insertAdjacentElement('afterend', tcpTag);
+            }
+            tcpTag.textContent = 'TCP ' + tcpWin;
+          });
+        });
+      }
+
+      function scheduleBadgeEnhance(data) {
+        if (badgeEnhanceTimer) {
+          clearTimeout(badgeEnhanceTimer);
+        }
+        badgeEnhanceTimer = setTimeout(function () {
+          badgeEnhanceTimer = null;
+          enhanceBadges(data);
+        }, 300);
+      }
+
+      function nudgeZuulGridRefresh() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var btn = document.querySelector('.zuul-reload-button button');
+        if (btn && !btn.disabled) {
+          btn.click();
+        }
+      }
+
+      function scheduleStatusPollInterval() {
+        if (statusPollTimer) {
+          clearInterval(statusPollTimer);
+        }
+        var ms = demoRunning ? STATUS_POLL_DEMO_MS : STATUS_POLL_MS;
+        statusPollTimer = setInterval(pollStatus, ms);
+      }
+
+      function pollStatus() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var tenant = tenantFromPath();
+        fetch('/api/tenant/' + tenant + '/status')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            lastStatusData = data;
+            render(data);
+            scheduleBadgeEnhance(data);
+          })
+          .catch(function () {});
+      }
+
+      function startLiveMonitoring() {
+        refreshAllParallel();
+        pollStatus();
+        scheduleStatusPollInterval();
+        scheduleGridRefresh();
+      }
+
+      setInterval(updateLiveMetrics, LIVE_POLL_MS);
+      setInterval(updateReportPanel, LIVE_POLL_MS * 2);
+      startLiveMonitoring();
+
+      var root = document.getElementById('root');
+      if (root) {
+        var moTimer = null;
+        new MutationObserver(function () {
+          if (!window.location.pathname.includes('/status') || !lastStatusData) {
+            return;
+          }
+          clearTimeout(moTimer);
+          moTimer = setTimeout(function () {
+            scheduleBadgeEnhance(lastStatusData);
+          }, 600);
+        }).observe(root, {
+          childList: true,
+          subtree: true,
+        });
+      }
+    })();
+    </script>

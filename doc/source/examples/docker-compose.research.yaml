@@ -1,0 +1,31 @@
+services:
+  scheduler:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: zuul-scheduler
+    image: zuul-research-scheduler:local
+    environment:
+      RL_WINDOW_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
+      RL_WINDOW_POLICY_PATH: /var/lib/zuul/models/ppo_gate_window.zip
+
+  web:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: zuul-web
+    image: zuul-research-web:local
+
+  executor:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: zuul-executor
+    image: zuul-research-executor:local
+
+  launcher:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      target: zuul-launcher
+    image: zuul-research-launcher:local

@@ -1,0 +1,132 @@
+# Gate job: deterministic failures for presentable RL vs TCP demos.
+#
+# Fail rule (demo_batch, default), in priority order:
+#   1. Stamped demo-meta.json "should_fail" (authoritative — supports
+#      adaptive/variable batch sizes with a deterministic fail ratio).
+#   2. Stamped batch_index < RESEARCH_FAIL_PER_BATCH (legacy stamps).
+#   3. change % 10 < RESEARCH_FAIL_PER_BATCH (no stamp at all).
+#
+# Legacy demo7: fail when change % 7 in {0,1,2} → exactly 3/7.
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Simulate gate build with deterministic failures for RL demo
+      shell: |
+        set -e
+        sleep "${RESEARCH_GATE_SLEEP_SEC:-1}"
+        python3 - <<'PY'
+        import hashlib
+        import json
+        import os
+        import random
+        import sys
+        from pathlib import Path
+
+        build = os.environ.get("ZUUL_UUID", "")
+        change = os.environ.get("ZUUL_CHANGE", "0")
+        mode = os.environ.get("RESEARCH_FAIL_MODE", "demo_batch")
+        rate = float(os.environ.get("RESEARCH_FAILURE_RATE", "0.80"))
+        every = max(1, int(os.environ.get("RESEARCH_FAIL_EVERY", "5")))
+        fail_per_batch = max(0, int(os.environ.get(
+            "RESEARCH_FAIL_PER_BATCH", "5")))
+        force_fail = os.environ.get("RESEARCH_FORCE_FAIL", "").lower() in (
+            "1", "true", "yes",
+        )
+
+        def load_batch_meta():
+            """Read stamped demo-meta.json from the change workspace."""
+            candidates = [
+                Path("demo-meta.json"),
+                Path("../demo-meta.json"),
+            ]
+            # Zuul checkout may nest under src/ or project dirs.
+            for p in Path(".").rglob("demo-meta.json"):
+                candidates.append(p)
+                break
+            for path in candidates:
+                try:
+                    if path.is_file():
+                        return json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+            return None
+
+        def batch_should_fail(batch_index, n_fail):
+            return int(batch_index) < int(n_fail)
+
+        if change.isdigit():
+            key = int(change)
+        else:
+            key = int(hashlib.md5((build or "0").encode()).hexdigest()[:8], 16)
+
+        meta = load_batch_meta()
+        batch_index = None
+        stamped_should_fail = None
+        if isinstance(meta, dict):
+            if meta.get("batch_index") is not None:
+                try:
+                    batch_index = int(meta["batch_index"])
+                except (TypeError, ValueError):
+                    batch_index = None
+            if meta.get("should_fail") is not None:
+                stamped_should_fail = bool(meta["should_fail"])
+        if batch_index is None:
+            env_idx = os.environ.get("RESEARCH_BATCH_INDEX", "")
+            if env_idx.isdigit():
+                batch_index = int(env_idx)
+
+        if force_fail:
+            should_fail = True
+        elif mode in ("demo_batch", "continuous"):
+            # Stamped should_fail is authoritative (adaptive batch sizes);
+            # then stamped batch_index; last resort change % 10.
+            if stamped_should_fail is not None:
+                should_fail = stamped_should_fail
+            elif batch_index is not None:
+                should_fail = batch_should_fail(batch_index, fail_per_batch)
+            else:
+                should_fail = (key % 10) < fail_per_batch
+        elif mode == "demo7":
+            should_fail = (key % 7) in (0, 1, 2)
+        elif mode == "every_nth":
+            should_fail = key > 0 and (key % every) == 0
+        elif mode == "alternate":
+            should_fail = (key % 2) == 0
+        else:
+            should_fail = random.random() < rate
+
+        banner = "=" * 60
+        if should_fail:
+            print(banner, flush=True)
+            print(
+                f"research-gate-job: *** FAILURE *** "
+                f"(mode={mode}, stamped={stamped_should_fail}, "
+                f"batch_index={batch_index}, "
+                f"fail_per_batch={fail_per_batch}, every={every}, "
+                f"rate={rate}, force={force_fail}, change={change}, "
+                f"build={build[:8]})",
+                flush=True,
+            )
+            print(banner, flush=True)
+            sys.exit(1)
+        print(banner, flush=True)
+        print(
+            f"research-gate-job: +++ SUCCESS +++ "
+            f"(mode={mode}, stamped={stamped_should_fail}, "
+            f"batch_index={batch_index}, "
+            f"fail_per_batch={fail_per_batch}, every={every}, "
+            f"rate={rate}, force={force_fail}, change={change}, "
+            f"build={build[:8]})",
+            flush=True,
+        )
+        print(banner, flush=True)
+        PY
+      environment:
+        ZUUL_UUID: "{{ zuul.build }}"
+        ZUUL_CHANGE: "{{ zuul.change }}"
+        RESEARCH_FAIL_MODE: "{{ research_fail_mode | default('demo_batch') }}"
+        RESEARCH_FAIL_EVERY: "{{ research_fail_every | default('5') }}"
+        RESEARCH_FAIL_PER_BATCH: "{{ research_fail_per_batch | default('5') }}"
+        RESEARCH_FAILURE_RATE: "{{ research_failure_rate | default('0.80') }}"
+        RESEARCH_FORCE_FAIL: "{{ research_force_fail | default('false') }}"
+        RESEARCH_GATE_SLEEP_SEC: "{{ research_gate_sleep_sec | default('1') }}"

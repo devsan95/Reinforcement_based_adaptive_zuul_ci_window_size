@@ -1,0 +1,15 @@
+- hosts: all
+  tasks:
+    - name: Fast check (~1s) then succeed (high Verified +1 rate)
+      shell: |
+        set -e
+        sleep "${RESEARCH_CHECK_SLEEP_SEC:-1}"
+        rate="${RESEARCH_FAILURE_RATE:-0}"
+        python3 - <<'PY'
+        import os, random, sys
+        rate = float(os.environ.get("RESEARCH_FAILURE_RATE", "0"))
+        sys.exit(1 if rate > 0 and random.random() < rate else 0)
+        PY
+      environment:
+        RESEARCH_FAILURE_RATE: "{{ research_failure_rate | default('0') }}"
+        RESEARCH_CHECK_SLEEP_SEC: "{{ research_check_sleep_sec | default('1') }}"

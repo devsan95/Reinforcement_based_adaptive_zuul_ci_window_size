@@ -1,0 +1,3 @@
+---
+# Intentionally empty — gate/check jobs come from central zuul-config only.
+# Do not add check jobs here; it breaks gate-only RL validation.

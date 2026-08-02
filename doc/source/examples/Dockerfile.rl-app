@@ -1,0 +1,50 @@
+# Single Dockerfile for the RL Zuul application (all custom images).
+# Build context: repository root (../../.. from doc/source/examples).
+#
+#   docker build -f doc/source/examples/Dockerfile.rl-app --target scheduler -t zuul-rl-scheduler .
+#   docker build -f doc/source/examples/Dockerfile.rl-app --target web        -t zuul-rl-web .
+#   docker build -f doc/source/examples/Dockerfile.rl-app --target bootstrap  -t zuul-rl-bootstrap .
+#   docker build -f doc/source/examples/Dockerfile.rl-app --target control    -t zuul-rl-control .
+
+# --- Zuul scheduler with RL patches, policy table, active config ---
+FROM quay.io/zuul-ci/zuul-scheduler AS scheduler
+COPY zuul/rl_window.py /usr/local/lib/python3.11/site-packages/zuul/rl_window.py
+COPY zuul/scheduler.py /usr/local/lib/python3.11/site-packages/zuul/scheduler.py
+COPY zuul/manager/__init__.py /usr/local/lib/python3.11/site-packages/zuul/manager/__init__.py
+COPY research/models /var/lib/zuul/models
+COPY doc/source/examples/etc_zuul /etc/zuul
+ENV RL_WINDOW_AUDIT_PATH=/var/lib/zuul/rl_window_audit.jsonl
+ENV RL_WINDOW_POLICY_PATH=/var/lib/zuul/models/ppo_gate_window_table.json
+ENV RL_DEFAULT_INITIAL_WINDOW=8
+
+# --- Zuul web: inject RL overlay into stock index.html (keeps correct JS bundle) ---
+FROM quay.io/zuul-ci/zuul-web AS web
+COPY doc/source/examples/etc_zuul /etc/zuul
+COPY doc/source/examples/web-overlay/rl-inject.html /overlay/rl-inject.html
+COPY doc/source/examples/images/inject-rl-ui.py /inject-rl-ui.py
+RUN mkdir -p /usr/local/lib/python3.11/site-packages/zuul/web/static/rl-report
+
+# --- One-shot bootstrap (gate/research Zuul config) ---
+FROM alpine:3.20 AS bootstrap
+RUN apk add --no-cache git curl bash
+COPY doc/source/examples/images/bootstrap.sh /bootstrap.sh
+COPY doc/source/examples/zuul-config /bootstrap/zuul-config
+RUN chmod +x /bootstrap.sh
+ENTRYPOINT ["/bootstrap.sh"]
+
+# --- Demo runner API + report generation ---
+FROM python:3.11-slim AS control
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates docker.io \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir \
+         --trusted-host pypi.org \
+         --trusted-host files.pythonhosted.org \
+         flask matplotlib PyJWT
+COPY research/control/server.py /app/server.py
+COPY research/analysis/compare_report.py /app/compare_report.py
+COPY research/traffic /app/traffic
+COPY doc/source/examples/zuul-config /bootstrap/zuul-config
+ENTRYPOINT ["python", "/app/server.py"]

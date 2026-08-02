@@ -1,0 +1,24 @@
+- tenant:
+    name: example-tenant
+    source:
+      gerrit:
+        config-projects:
+          # Default include is all classes (jobs + provider/section/image/…).
+          # Explicit include-provider-config keeps static nodes working even
+          # if someone later restricts job includes.
+          - zuul-config:
+              include-provider-config: true
+        untrusted-projects:
+          - test1:
+              include:
+                - job
+                - project
+          - test2:
+              include:
+                - job
+                - project
+      opendev.org:
+        untrusted-projects:
+          - zuul/zuul-jobs:
+              include:
+                - job

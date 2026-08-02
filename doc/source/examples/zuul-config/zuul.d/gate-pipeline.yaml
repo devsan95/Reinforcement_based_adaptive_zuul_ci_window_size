@@ -1,0 +1,37 @@
+- pipeline:
+    name: gate
+    description: |
+      Research gate pipeline with dynamic window sizing (TCP baseline or RL).
+    manager: dependent
+    post-review: True
+    require:
+      gerrit:
+        open: True
+        current-patchset: True
+        approval:
+          - Workflow: 1
+    trigger:
+      gerrit:
+        - event: comment-added
+          approval:
+            - Workflow: 1
+    start:
+      gerrit:
+        Verified: 0
+    success:
+      gerrit:
+        Verified: 2
+        submit: true
+    failure:
+      gerrit:
+        Verified: -2
+    # Small demo baseline (8) so a 10-change batch immediately exceeds the
+    # window: after the first failures TCP collapses 8 → 4 → 2 (exponential)
+    # while RL holds ~8, and min(queue, window) differentiates right away.
+    window: 8
+    window-floor: 2
+    window-ceiling: 50
+    window-increase-type: linear
+    window-increase-factor: 1
+    window-decrease-type: exponential
+    window-decrease-factor: 2

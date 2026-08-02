@@ -1,0 +1,349 @@
+<html lang="en" class="layout-pf layout-pf-fixed">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="theme-color" content="#000000">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <title>Zuul</title>
+    <script type="module" crossorigin src="/assets/index-CVtrfsei.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CYT_J3fu.css">
+    <style id="zuul-rl-window-style">
+      #zuul-rl-window-banner {
+        background: #004368;
+        color: #fff;
+        padding: 10px 20px;
+        font-size: 14px;
+        font-family: RedHatText, Overpass, sans-serif;
+        border-bottom: 2px solid #06c;
+        margin: 0 0 12px 0;
+        border-radius: 4px;
+      }
+      .zuul-rl-queue-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 8px;
+        background: #f0ab00;
+        color: #151515;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-align: 0.1em;
+      }
+      #zuul-rl-report-panel {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        width: 420px;
+        height: 420px;
+        z-index: 10001;
+        border: 1px solid #8a8d90;
+        border-radius: 6px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(3, 3, 3, 0.35);
+        overflow: hidden;
+        display: none;
+      }
+      #zuul-rl-report-panel .header {
+        background: #151515;
+        color: #fff;
+        font-size: 12px;
+        padding: 6px 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      #zuul-rl-report-panel .header a {
+        color: #73bcf7;
+        text-decoration: none;
+      }
+      #zuul-rl-report-body {
+        padding: 8px 10px;
+        height: calc(100% - 35px);
+        overflow: auto;
+      }
+      #zuul-rl-run-btn {
+        background: #06c;
+        color: #fff;
+        border: 0;
+        border-radius: 3px;
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+      #zuul-rl-run-btn[disabled] {
+        background: #6a6e73;
+        cursor: default;
+      }
+      .zuul-rl-status-line {
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .zuul-rl-graph {
+        width: 100%;
+        margin-bottom: 8px;
+        border: 1px solid #d2d2d2;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <div id="root"></div>
+    <script>
+    (function () {
+      'use strict';
+      var BANNER_ID = 'zuul-rl-window-banner';
+      var PANEL_ID = 'zuul-rl-report-panel';
+      var REPORT_BASE = '/rl-report';
+      var CONTROL_BASE = 'http://localhost:19100';
+
+      function tenantFromPath() {
+        var match = window.location.pathname.match(/\/t\/([^/]+)/);
+        return match ? match[1] : 'example-tenant';
+      }
+
+      function formatQueue(q) {
+        var delta = q.action_delta;
+        var deltaStr = delta == null ? '' :
+          ' (' + (delta >= 0 ? '+' : '') + delta + ')';
+        return q.name + ': current ' + q.current_window +
+          ' \u2192 RL ' + q.recommended_window + deltaStr;
+      }
+
+      function ensureBanner() {
+        var banner = document.getElementById(BANNER_ID);
+        if (banner) {
+          return banner;
+        }
+        banner = document.createElement('div');
+        banner.id = BANNER_ID;
+        banner.style.display = 'none';
+        return banner;
+      }
+
+      function placeBanner(banner) {
+        banner.style.position = 'fixed';
+        banner.style.top = '110px';
+        banner.style.left = '0';
+        banner.style.right = '0';
+        banner.style.zIndex = '10000';
+        if (banner.parentNode !== document.body) {
+          document.body.insertBefore(banner, document.body.firstChild);
+        }
+      }
+
+      function ensureReportPanel() {
+        var panel = document.getElementById(PANEL_ID);
+        if (panel) {
+          return panel;
+        }
+        panel = document.createElement('div');
+        panel.id = PANEL_ID;
+        panel.innerHTML =
+          '<div class="header">' +
+          '<span>RL demo control</span>' +
+          '<span><button id="zuul-rl-run-btn" type="button">Run demo</button>' +
+          '<a id="zuul-rl-report-link" target="_blank" href="' +
+          REPORT_BASE + '/report.html">open</a></span></div>' +
+          '<div id="zuul-rl-report-body">' +
+          '<div id="zuul-rl-status" class="zuul-rl-status-line">No run yet.</div>' +
+          '<img id="zuul-rl-throughput" class="zuul-rl-graph" alt="Throughput graph"/>' +
+          '<img id="zuul-rl-delta" class="zuul-rl-graph" alt="Window delta graph"/>' +
+          '</div>';
+        var runBtn = panel.querySelector('#zuul-rl-run-btn');
+        if (runBtn) {
+          runBtn.addEventListener('click', triggerDemo);
+        }
+        document.body.appendChild(panel);
+        return panel;
+      }
+
+      function triggerDemo() {
+        fetch(CONTROL_BASE + '/run-demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        })
+          .then(function () { updateReportPanel(); })
+          .catch(function () {});
+      }
+
+      function updateReportPanel() {
+        if (!window.location.pathname.includes('/status')) {
+          var existing = document.getElementById(PANEL_ID);
+          if (existing) {
+            existing.style.display = 'none';
+          }
+          return;
+        }
+        var panel = ensureReportPanel();
+        fetch(CONTROL_BASE + '/status', { cache: 'no-store' })
+          .then(function (resp) {
+            if (!resp.ok) {
+              throw new Error('control service unavailable');
+            }
+            return resp.json();
+          })
+          .then(function (st) {
+            var token = String(Date.now());
+            var link = panel.querySelector('#zuul-rl-report-link');
+            var status = panel.querySelector('#zuul-rl-status');
+            var btn = panel.querySelector('#zuul-rl-run-btn');
+            if (btn) {
+              btn.disabled = !!st.running;
+              btn.textContent = st.running ? 'Running...' : 'Run demo';
+            }
+            if (status) {
+              if (st.running) {
+                status.textContent = 'Demo run in progress...';
+              } else if (st.last_error) {
+                status.textContent = 'Last run failed: ' + st.last_error;
+              } else if (st.latest_run) {
+                status.textContent = 'Latest run: ' + st.latest_run;
+              } else {
+                status.textContent = 'No run yet.';
+              }
+            }
+
+            var throughput = panel.querySelector('#zuul-rl-throughput');
+            var delta = panel.querySelector('#zuul-rl-delta');
+            if (throughput) {
+              throughput.src = REPORT_BASE + '/throughput_graph.png?v=' + encodeURIComponent(token);
+            }
+            if (delta) {
+              delta.src = REPORT_BASE + '/window_delta_graph.png?v=' + encodeURIComponent(token);
+            }
+            var src = REPORT_BASE + '/report.html?v=' + encodeURIComponent(token);
+            if (link) {
+              link.href = src;
+            }
+            panel.style.display = 'block';
+          })
+          .catch(function () {
+            var panel = document.getElementById(PANEL_ID);
+            if (panel) {
+              panel.style.display = 'none';
+            }
+          });
+      }
+
+      function render(data) {
+        if (!window.location.pathname.includes('/status')) {
+          var existing = document.getElementById(BANNER_ID);
+          if (existing) {
+            existing.style.display = 'none';
+          }
+          return;
+        }
+
+        var parts = [];
+        (data.pipelines || []).forEach(function (pipeline) {
+          var rl = pipeline.rl_window;
+          if (!rl || !rl.queues || !rl.queues.length) {
+            return;
+          }
+          parts.push(pipeline.name + ' [' + rl.mode + ']: ' +
+            rl.queues.map(formatQueue).join(' \u00b7 '));
+        });
+
+        var banner = ensureBanner();
+        placeBanner(banner);
+        if (!parts.length) {
+          banner.style.display = 'none';
+          return;
+        }
+        banner.style.display = 'block';
+        banner.innerHTML =
+          '<strong>RL recommended window sizes</strong> \u2014 ' +
+          parts.join(' &nbsp;|&nbsp; ');
+      }
+
+      function enhanceBadges(data) {
+        var gate = (data.pipelines || []).find(function (p) {
+          return p.name === 'gate';
+        });
+        if (!gate || !gate.rl_window || !gate.rl_window.queues) {
+          return;
+        }
+        var q = gate.rl_window.queues[0];
+        if (!q) {
+          return;
+        }
+
+        document.querySelectorAll('a').forEach(function (link) {
+          var name = link.textContent.trim();
+          if (name !== 'gate' && name !== 'test1') {
+            return;
+          }
+          var host = link.closest('.pf-v6-c-card__title, .pf-c-card__title, h3, .zuul-pipeline-summary');
+          if (!host) {
+            host = link.parentElement;
+          }
+          if (!host) {
+            return;
+          }
+          var tag = host.querySelector('.zuul-rl-queue-badge');
+          if (!tag) {
+            tag = document.createElement('span');
+            tag.className = 'zuul-rl-queue-badge';
+            link.insertAdjacentElement('afterend', tag);
+          }
+          tag.textContent = 'RL rec. ' + q.recommended_window;
+        });
+
+        var rlByWindow = {};
+        gate.rl_window.queues.forEach(function (item) {
+          rlByWindow[item.current_window] = item.recommended_window;
+        });
+
+        document.querySelectorAll(
+          '.pf-c-badge, .pf-v6-c-badge, .pf-v6-c-label, .pf-c-label'
+        ).forEach(function (badge) {
+          var text = (badge.textContent || '').trim();
+          var match = text.match(/^(\d+)\s*\/\s*(\d+)/);
+          if (!match) {
+            return;
+          }
+          var window = parseInt(match[2], 10);
+          var rl = rlByWindow[window];
+          if (rl == null || text.indexOf('RL') >= 0) {
+            return;
+          }
+          badge.textContent = match[1] + ' / ' + window + ' \u2192 RL ' + rl;
+        });
+      }
+
+      function poll() {
+        if (!window.location.pathname.includes('/status')) {
+          return;
+        }
+        var tenant = tenantFromPath();
+        fetch('/api/tenant/' + tenant + '/status')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            render(data);
+            updateReportPanel();
+            setTimeout(function () { enhanceBadges(data); }, 400);
+            setTimeout(function () { enhanceBadges(data); }, 2000);
+          })
+          .catch(function () {});
+      }
+
+      setInterval(poll, 10000);
+      setInterval(updateReportPanel, 15000);
+      poll();
+      updateReportPanel();
+      var root = document.getElementById('root');
+      if (root) {
+        new MutationObserver(poll).observe(root, {
+          childList: true,
+          subtree: true,
+        });
+      }
+    })();
+    </script>
+  </body>
+</html>

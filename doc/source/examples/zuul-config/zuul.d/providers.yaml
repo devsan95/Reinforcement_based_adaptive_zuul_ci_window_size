@@ -1,0 +1,51 @@
+- image:
+    name: ubuntu-jammy
+    type: cloud
+
+- flavor:
+    name: normal
+
+- label:
+    name: ubuntu-jammy
+    image: ubuntu-jammy
+    flavor: normal
+
+# Match Zuul static-driver fixtures: abstract base holds connection,
+# concrete section inherits and declares flavors. Tenant main.yaml must
+# include provider config classes (section/provider) or use the default
+# config-project include (all classes).
+- section:
+    name: static-base
+    abstract: true
+    connection: static
+
+- section:
+    name: static
+    parent: static-base
+    flavors:
+      - name: normal
+
+- provider:
+    name: static-main
+    section: static
+    nodes:
+      # Hostname must match the compose service DNS name (`node`).
+      # To force slot-host recreation after changing `slots`, temporarily
+      # rename then restore, or wipe volumes — launcher does not resize
+      # existing ZK slot-hosts in place.
+      - name: node
+        label: ubuntu-jammy
+        connection-port: 22
+        host-key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgHJYejINIKzUiuSJ2MN8uPc+dfFrZ9JH1hLWS8gI+g"
+    labels:
+      - name: ubuntu-jammy
+        # Parallel capacity for window ~20–50 (check + gate jobs).
+        # Jobs stuck in "waiting" usually mean insufficient slots/nodes,
+        # not merely long job duration. Sized for continuous 10-change
+        # batches (DEMO_BATCH_SIZE=10) with ~50 parallel capacity.
+        slots: 50
+        host-key-checking: false
+    images:
+      - name: ubuntu-jammy
+        python-path: /usr/bin/python3
+        username: root

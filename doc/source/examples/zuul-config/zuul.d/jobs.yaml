@@ -1,0 +1,41 @@
+- job:
+    name: base
+    parent: null
+    nodeset:
+      nodes:
+        - name: ubuntu-jammy
+          label: ubuntu-jammy
+
+# Research demo jobs — continuous batch fail rule:
+# exactly 5 fail + 5 pass per stamped batch of 10 (batch_index 0..4 fail).
+- job:
+    name: research-base
+    parent: null
+    nodeset:
+      nodes:
+        - name: ubuntu-jammy
+          label: ubuntu-jammy
+    timeout: 30
+
+- job:
+    name: research-gate-job
+    parent: research-base
+    run: playbooks/research/gate-job.yaml
+    timeout: 60
+    vars:
+      research_fail_mode: demo_batch
+      research_fail_per_batch: "5"
+      # ~6s gate jobs: with 10 changes arriving every 20s the gate queue
+      # stays deeper than the demo window (8), so in-flight RL vs TCP
+      # counts stay differentiated through the middle of the run.
+      research_gate_sleep_sec: "6"
+
+# Fast check (~1s shell work); almost always succeeds so Verified +1 lands.
+- job:
+    name: research-check-job
+    parent: research-base
+    run: playbooks/research/check-job.yaml
+    timeout: 30
+    vars:
+      research_failure_rate: "0"
+      research_check_sleep_sec: "1"

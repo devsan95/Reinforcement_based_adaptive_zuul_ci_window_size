@@ -1,0 +1,47 @@
+services:
+  rl-report:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: control
+    image: zuul-research-report:local
+    entrypoint: ["python", "/app/compare_report.py"]
+    volumes:
+      - ../../../research/results:/results
+    networks:
+      - zuul
+  rl-control:
+    build:
+      context: ../../..
+      dockerfile: doc/source/examples/Dockerfile.rl-app
+      target: control
+    image: zuul-research-control:local
+    environment:
+      RL_CONTROL_BASE_DIR: /results
+      RL_CONTROL_PUBLISH_DIR: /published
+      RL_CONTROL_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
+      RL_CONTROL_ZUUL_API: http://web:9000
+      GERRIT_URL: http://gerrit:8080
+      RL_DEMO_RESET_PATH: /var/lib/zuul/rl_demo_reset.request
+      DEMO_QUEUE_CLEAR_TIMEOUT: "30"
+      DEMO_QUEUE_POLL_INTERVAL: "0.5"
+      DEMO_DEQUEUE_WORKERS: "24"
+      TRAFFIC_WORKERS: "8"
+      LIVE_METRICS_CACHE_SEC: "2"
+    volumes:
+      - ../../../research/results:/results
+      - lib-zuul-scheduler:/var/lib/zuul
+      - rl-report:/published
+    ports:
+      - "19100:19100"
+    depends_on:
+      - web
+      - scheduler
+    networks:
+      - zuul
+  web:
+    volumes:
+      - rl-report:/usr/local/lib/python3.11/site-packages/zuul/web/static/rl-report
+
+volumes:
+  rl-report:

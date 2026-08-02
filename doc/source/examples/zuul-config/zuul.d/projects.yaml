@@ -1,0 +1,29 @@
+# Do not use a catch-all project regex here — it merges with named projects
+# and can clear gate/check jobs (gate queue items end up with jobs: []).
+- project:
+    name: zuul-config
+    check:
+      jobs:
+        - noop
+    gate:
+      jobs:
+        - noop
+
+# Traditional Zuul flow: patchset → check (Verified +1) → Workflow +1 → gate.
+- project:
+    name: test1
+    check:
+      jobs:
+        - research-check-job
+    gate:
+      jobs:
+        - research-gate-job
+
+- project:
+    name: test2
+    check:
+      jobs:
+        - research-check-job
+    gate:
+      jobs:
+        - research-gate-job

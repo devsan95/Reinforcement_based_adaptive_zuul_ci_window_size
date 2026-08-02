@@ -1,0 +1,24 @@
+# Mount patched RL source into stock Zuul images (no Docker rebuild required).
+services:
+  scheduler:
+    image: quay.io/zuul-ci/zuul-scheduler
+    volumes:
+      - ../../../zuul/rl_window.py:/usr/local/lib/python3.11/site-packages/zuul/rl_window.py:ro
+      - ../../../zuul/scheduler.py:/usr/local/lib/python3.11/site-packages/zuul/scheduler.py:ro
+      - ../../../zuul/manager/__init__.py:/usr/local/lib/python3.11/site-packages/zuul/manager/__init__.py:ro
+      - ../../../research/models:/var/lib/zuul/models:ro
+    environment:
+      RL_WINDOW_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
+      RL_WINDOW_POLICY_PATH: /var/lib/zuul/models/ppo_gate_window_table.json
+      RL_DEFAULT_INITIAL_WINDOW: "20"
+      RL_DEMO_RESET_PATH: /var/lib/zuul/rl_demo_reset.request
+  web:
+    ports:
+      - "19090:9000"
+      - "9090:9000"
+    volumes:
+      - ./web-overlay:/overlay:ro
+    command: |
+      sh -c 'cp /overlay/index.html /usr/local/lib/python3.11/site-packages/zuul/web/static/index.html && \
+             /var/playbooks/wait-to-start-certs.sh && \
+             exec zuul-web -f'
