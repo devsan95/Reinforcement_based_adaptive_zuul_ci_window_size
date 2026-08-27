@@ -1,3 +1,4 @@
+    <!-- zuul-rl-overlay-begin -->
     <style id="zuul-rl-window-style">
       #zuul-rl-window-banner {
         background: #004368;
@@ -44,8 +45,8 @@
         position: fixed;
         right: 14px;
         bottom: 14px;
-        width: 520px;
-        height: 780px;
+        width: 500px;
+        height: 640px;
         z-index: 10001;
         border: 1px solid #8a8d90;
         border-radius: 6px;
@@ -161,6 +162,12 @@
       #zuul-rl-demo-detail {
         font-size: 11px;
         color: #393f44;
+        margin-bottom: 4px;
+        line-height: 1.35;
+      }
+      #zuul-rl-demo-batch-tip {
+        font-size: 10px;
+        color: #6a6e73;
         margin-bottom: 6px;
         line-height: 1.35;
       }
@@ -232,28 +239,6 @@
       .zuul-rl-failures:empty {
         display: none;
       }
-      .zuul-rl-failure-counter {
-        font-size: 12px;
-        font-weight: 600;
-        margin-bottom: 8px;
-        padding: 5px 8px;
-        background: #f5f5f5;
-        border-radius: 3px;
-        border: 1px solid #d2d2d2;
-        color: #151515;
-        line-height: 1.35;
-      }
-      .zuul-rl-failure-counter.zuul-rl-has-failures {
-        background: #faeae5;
-        border-color: #c9190b;
-        color: #a30000;
-      }
-      .zuul-rl-failure-counter .zuul-rl-fail-tcp {
-        color: #c46100;
-      }
-      .zuul-rl-failure-counter .zuul-rl-fail-rl {
-        color: #06c;
-      }
       .zuul-rl-failures strong {
         display: block;
         margin-bottom: 4px;
@@ -293,22 +278,10 @@
       }
       .zuul-rl-efficiency-block {
         margin-bottom: 8px;
-        padding: 8px;
+        padding: 6px 8px;
         background: #f0f0f0;
         border-radius: 4px;
         border: 1px solid #d2d2d2;
-      }
-      .zuul-rl-efficiency-value {
-        font-size: 22px;
-        font-weight: 700;
-        color: #06c;
-        line-height: 1.2;
-        margin: 2px 0 4px;
-      }
-      .zuul-rl-efficiency-value.zuul-rl-eff-na {
-        font-size: 16px;
-        color: #6a6e73;
-        font-weight: 600;
       }
       .zuul-rl-efficiency-formula {
         font-size: 10px;
@@ -322,55 +295,11 @@
         background: #fff;
         border-radius: 3px;
       }
-      .zuul-rl-effectiveness-block {
-        margin-bottom: 8px;
-        padding: 8px;
-        background: #e7f6e7;
-        border: 1px solid #3e8635;
-        border-radius: 4px;
-      }
-      .zuul-rl-effectiveness-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px 10px;
-      }
-      .zuul-rl-effectiveness-metric {
-        font-size: 11px;
-        line-height: 1.35;
-      }
-      .zuul-rl-effectiveness-metric.zuul-rl-metric-primary {
-        grid-column: 1 / -1;
-        padding: 6px 8px;
-        background: #fff;
-        border-radius: 4px;
-        border: 1px solid #b8d4b8;
-      }
-      .zuul-rl-effectiveness-label {
-        color: #393f44;
-        font-weight: 600;
-        cursor: help;
-        border-bottom: 1px dotted #8a8d90;
-      }
-      .zuul-rl-effectiveness-value {
-        font-size: 18px;
-        font-weight: 700;
-        color: #3e8635;
-        margin-top: 2px;
-      }
-      .zuul-rl-effectiveness-metric.zuul-rl-metric-primary
-        .zuul-rl-effectiveness-value {
-        font-size: 24px;
-      }
-      .zuul-rl-effectiveness-sub {
-        font-size: 10px;
-        color: #6a6e73;
-        margin-top: 2px;
-      }
       .zuul-rl-highlight-grid {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 6px;
-        margin-bottom: 10px;
+        margin-bottom: 0;
       }
       .zuul-rl-highlight-card {
         background: #f5f5f5;
@@ -468,30 +397,38 @@
         border: 1px solid #d2d2d2;
         border-radius: 3px;
       }
-      #zuul-rl-benefit-story {
-        display: none;
-        margin-bottom: 8px;
-        padding: 8px 10px;
-        background: linear-gradient(135deg, #e7f6e7, #f0faf0);
-        border: 1px solid #3e8635;
-        border-left: 4px solid #3e8635;
-        border-radius: 4px;
+      #zuul-rl-live-line {
         font-size: 12px;
         line-height: 1.45;
+        padding: 6px 8px;
+        background: #f5f5f5;
+        border: 1px solid #d2d2d2;
+        border-radius: 3px;
         color: #151515;
       }
-      #zuul-rl-benefit-story .zuul-rl-benefit-headline {
-        font-size: 13px;
-        font-weight: 700;
+      #zuul-rl-live-line.zuul-rl-sat-ok {
+        background: #e7f6e7;
+        border-color: #3e8635;
         color: #1e4f18;
-        margin-bottom: 2px;
       }
-      #zuul-rl-benefit-story .zuul-rl-benefit-numbers {
+      #zuul-rl-live-line.zuul-rl-sat-low {
+        background: #fdf7e7;
+        border-color: #f0ab00;
+        color: #795600;
+      }
+      #zuul-rl-live-line .zuul-rl-live-rl { color: #06c; font-weight: 700; }
+      #zuul-rl-live-line .zuul-rl-live-tcp { color: #c46100; font-weight: 700; }
+      #zuul-rl-done-banner {
+        display: none;
+        margin-bottom: 6px;
+        padding: 5px 8px;
+        background: #e7f6e7;
+        border: 1px solid #3e8635;
+        border-radius: 3px;
+        font-size: 11px;
         font-weight: 600;
+        color: #1e4f18;
       }
-      #zuul-rl-benefit-story .zuul-rl-benefit-tcp { color: #c46100; }
-      #zuul-rl-benefit-story .zuul-rl-benefit-rl { color: #06c; }
-      #zuul-rl-benefit-story .zuul-rl-benefit-saved { color: #3e8635; }
       #zuul-rl-demo-warning {
         display: none;
         margin-top: 5px;
@@ -503,41 +440,7 @@
         color: #795600;
         line-height: 1.35;
       }
-      #zuul-rl-final-summary {
-        display: none;
-        margin-bottom: 8px;
-        padding: 9px 10px;
-        background: #e7f6e7;
-        border: 2px solid #3e8635;
-        border-radius: 4px;
-        font-size: 12px;
-        line-height: 1.45;
-      }
-      #zuul-rl-final-summary .zuul-rl-final-title {
-        font-size: 13px;
-        font-weight: 700;
-        color: #1e4f18;
-        margin-bottom: 4px;
-      }
-      #zuul-rl-final-summary .zuul-rl-final-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 4px;
-      }
-      #zuul-rl-final-summary .zuul-rl-final-chip {
-        background: #fff;
-        border: 1px solid #b8d4b8;
-        border-radius: 12px;
-        padding: 2px 9px;
-        font-size: 11px;
-        font-weight: 600;
-        color: #151515;
-      }
-      #zuul-rl-report-panel {
-        height: 860px;
-      }
-      /* --- Section framing: 6 labeled, scannable blocks --- */
+      /* --- Section framing: labeled, scannable blocks --- */
       .zuul-rl-section {
         margin-bottom: 10px;
         border: 1px solid #d2d2d2;
@@ -580,32 +483,61 @@
         display: flex;
         gap: 8px;
         margin-bottom: 8px;
+        flex-wrap: wrap;
+        align-items: center;
       }
       .zuul-rl-control-buttons button {
         font-size: 13px;
         padding: 6px 14px;
         margin-right: 0;
       }
-      #zuul-rl-queue-saturation {
-        margin-top: 6px;
-        padding: 4px 8px;
-        border-radius: 3px;
+      .zuul-rl-demo-params {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         font-size: 11px;
+        color: #151515;
+      }
+      .zuul-rl-demo-params input {
+        width: 52px;
+        padding: 3px 4px;
+        font-size: 12px;
+        border: 1px solid #8a8d90;
+        border-radius: 3px;
+      }
+      .zuul-rl-param-tip {
+        font-size: 10px;
+        color: #6a6e73;
+        margin: 2px 0 6px;
+        line-height: 1.3;
+      }
+      .zuul-rl-after-run {
+        margin-top: 8px;
+        padding: 8px 10px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        border-left: 3px solid #06c;
+      }
+      .zuul-rl-after-run-title {
         font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: #151515;
+      }
+      .zuul-rl-after-run-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px 12px;
+        font-size: 11px;
         line-height: 1.35;
-        background: #f5f5f5;
-        border: 1px solid #d2d2d2;
-        color: #393f44;
       }
-      #zuul-rl-queue-saturation.zuul-rl-sat-ok {
-        background: #e7f6e7;
-        border-color: #3e8635;
-        color: #1e4f18;
+      .zuul-rl-after-run-grid .label {
+        color: #6a6e73;
       }
-      #zuul-rl-queue-saturation.zuul-rl-sat-low {
-        background: #fdf7e7;
-        border-color: #f0ab00;
-        color: #795600;
+      .zuul-rl-after-run-grid .value {
+        color: #151515;
+        font-weight: 600;
+        text-align: right;
       }
       #zuul-rl-decision-reason {
         font-size: 11.5px;
@@ -620,32 +552,45 @@
         font-weight: 700;
         color: #004368;
       }
-      .zuul-rl-highlight-grid {
-        grid-template-columns: repeat(3, 1fr);
+      #zuul-rl-decision-reason .zuul-rl-reason-debug {
+        display: inline;
+        margin-left: 6px;
+        font-size: 10px;
+        color: #6a6e73;
       }
-      .zuul-rl-highlight-card.zuul-rl-hl-queue {
-        background: #f5f5f5;
-        border-color: #8a8d90;
+      #zuul-rl-decision-reason .zuul-rl-reason-debug summary {
+        cursor: pointer;
+        list-style: none;
+        display: inline;
+        color: #0066cc;
+        font-weight: 600;
       }
-      .zuul-rl-highlight-card.zuul-rl-hl-queue.zuul-rl-sat-ok {
-        background: #e7f6e7;
-        border-color: #3e8635;
+      #zuul-rl-decision-reason .zuul-rl-reason-debug summary::-webkit-details-marker {
+        display: none;
       }
-      .zuul-rl-highlight-card.zuul-rl-hl-queue.zuul-rl-sat-low {
-        background: #fdf7e7;
-        border-color: #f0ab00;
+      #zuul-rl-decision-reason .zuul-rl-reason-debug[open] summary {
+        display: block;
+        margin-bottom: 2px;
+      }
+      #zuul-rl-decision-reason .zuul-rl-reason-debug .zuul-rl-reason-debug-body {
+        display: block;
+        margin-top: 2px;
+        color: #6a6e73;
+        font-weight: 400;
+        line-height: 1.35;
       }
       .zuul-rl-highlight-card.zuul-rl-hl-fail .zuul-rl-hl-value {
         color: #a30000;
       }
-      .zuul-rl-highlight-card.zuul-rl-hl-rl .zuul-rl-hl-value {
-        color: #06c;
-      }
-      .zuul-rl-highlight-card.zuul-rl-hl-tcp .zuul-rl-hl-value {
-        color: #c46100;
-      }
       .zuul-rl-highlight-card.zuul-rl-hl-win .zuul-rl-hl-value {
         color: #3e8635;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-adv .zuul-rl-hl-value {
+        color: #06c;
+      }
+      .zuul-rl-highlight-card.zuul-rl-hl-peak .zuul-rl-hl-value {
+        color: #004368;
+        font-size: 14px;
       }
     </style>
     <script>
@@ -662,13 +607,203 @@
       var GRID_REFRESH_MS = 5000;
       var GRID_REFRESH_DEMO_MS = 2500;
       var BASELINE_WINDOW = 8;
-      var DEMO_CHANGE_COUNT = 150;
-      var DEMO_EXPECTED_FAILURES = 75;
+      // Mirrored server defaults; overwritten from /status or /live-metrics.
+      var DEMO_CHANGE_COUNT = 100;
+      var DEMO_EXPECTED_FAILURES = 50;
       var DEMO_BATCH_SIZE = 10;
       var DEMO_DURATION_SEC = 300;
       var DEMO_FAIL_PER_BATCH = 5;
       // Bumped when the panel HTML structure changes so stale panels rebuild.
-      var PANEL_LAYOUT_VERSION = '2';
+      var PANEL_LAYOUT_VERSION = '10';
+      var demoInputsPrefillDone = false;
+
+      /** Prefer the coherent session_summary block; fall back to legacy fields. */
+      function summaryJobRuns(metrics, extrasFallback) {
+        var ss = metrics && metrics.session_summary;
+        if (ss && ss.job_runs_saved != null && !isNaN(Number(ss.job_runs_saved))) {
+          return Math.max(0, Math.round(Number(ss.job_runs_saved)));
+        }
+        var eff = (metrics && metrics.effectiveness) || {};
+        if (eff.job_runs_saved != null && !isNaN(Number(eff.job_runs_saved))) {
+          return Math.max(0, Math.round(Number(eff.job_runs_saved)));
+        }
+        var latest = (metrics && metrics.latest) || {};
+        if (latest.job_runs_saved != null && !isNaN(Number(latest.job_runs_saved))) {
+          return Math.max(0, Math.round(Number(latest.job_runs_saved)));
+        }
+        var fb = extrasFallback != null ? Number(extrasFallback) : 0;
+        return isNaN(fb) ? 0 : Math.max(0, Math.round(fb));
+      }
+
+      function numOrNull(v) {
+        if (v == null || v === '') {
+          return null;
+        }
+        var n = Number(v);
+        return isNaN(n) ? null : n;
+      }
+
+      function getSessionSummary(metrics) {
+        if (metrics && metrics.session_summary) {
+          var s = metrics.session_summary;
+          var extrasN = numOrNull(s.extra_changes_total);
+          if (extrasN == null) {
+            extrasN = 0;
+          }
+          var jobRuns = s.job_runs_saved != null ?
+            summaryJobRuns(metrics, extrasN) : extrasN;
+          // Keep job-runs on the same basis as extras (never invent a gap).
+          if (jobRuns !== extrasN) {
+            jobRuns = extrasN;
+          }
+          var submittedN = numOrNull(s.changes_submitted);
+          if (submittedN == null) {
+            submittedN = numOrNull(s.submitted);
+          }
+          if (submittedN == null) {
+            submittedN = 0;
+          }
+          var mergedN = numOrNull(s.merged);
+          if (mergedN == null) {
+            mergedN = numOrNull(s.session_changes_merged);
+          }
+          if (mergedN == null) {
+            mergedN = 0;
+          }
+          s = Object.assign({}, s, {
+            changes_submitted: submittedN,
+            submitted: submittedN,
+            merged: mergedN,
+            session_changes_merged: mergedN,
+            extra_changes_total: extrasN,
+            job_runs_saved: jobRuns,
+            rl_advantage_pct: numOrNull(s.rl_advantage_pct)
+          });
+          return s;
+        }
+        var latest = (metrics && metrics.latest) || {};
+        var adv = (metrics && metrics.advantage) || {};
+        var eff = (metrics && metrics.effectiveness) || {};
+        var counts = (metrics && metrics.failure_counts) || {};
+        var failN = eff.session_gate_failures != null ?
+          eff.session_gate_failures :
+          (counts.gate_jobs_total || 0);
+        var extras = latest.extra_changes_total != null ?
+          latest.extra_changes_total :
+          (adv.extra_changes_total != null ? adv.extra_changes_total :
+            (eff.extra_changes_total != null ? eff.extra_changes_total : 0));
+        extras = numOrNull(extras);
+        if (extras == null) {
+          extras = 0;
+        }
+        var advPct = numOrNull(latest.rl_advantage_pct);
+        if (advPct == null) {
+          advPct = numOrNull(adv.rl_advantage_pct);
+        }
+        var submitted = 0;
+        var prog = (metrics && metrics.demo_progress) || {};
+        if (prog.changes_submitted != null) {
+          submitted = numOrNull(prog.changes_submitted) || 0;
+        }
+        var merged = numOrNull(eff.session_changes_merged);
+        if (merged == null) {
+          merged = 0;
+        }
+        return {
+          changes_submitted: submitted,
+          submitted: submitted,
+          merged: merged,
+          session_changes_merged: merged,
+          gate_failures: failN || 0,
+          extra_changes_total: extras,
+          job_runs_saved: summaryJobRuns(metrics, extras),
+          minutes_saved: numOrNull(
+            eff.minutes_saved != null ? eff.minutes_saved : latest.minutes_saved),
+          rl_advantage_pct: advPct,
+          rl_advantage_pct_raw: adv.rl_advantage_pct_raw,
+          advantage_capped: !!adv.advantage_capped,
+          advantage_source: adv.advantage_source || '',
+          advantage_formula: adv.advantage_formula || '',
+          rl_held_peak: adv.rl_held_peak != null ?
+            adv.rl_held_peak : latest.rl_held_peak,
+          tcp_after_floor: adv.tcp_after_floor != null ?
+            adv.tcp_after_floor : latest.tcp_after_floor,
+          impact_summary: eff.impact_summary || latest.impact_summary || '',
+          live: {
+            rl_window: latest.rl_window,
+            tcp_window: latest.tcp_window,
+            extra_in_flight: latest.extra_in_flight != null ?
+              latest.extra_in_flight : 0,
+            gate_queue_count: latest.gate_queue_count || 0,
+            changes_in_window_rl: latest.changes_in_window_rl || 0,
+            changes_in_window_tcp: latest.changes_in_window_tcp || 0
+          }
+        };
+      }
+
+      function setDemoInputsDisabled(panel, disabled) {
+        if (!panel) {
+          return;
+        }
+        ['#zuul-rl-total-changes', '#zuul-rl-gate-failures'].forEach(
+          function (sel) {
+            var inp = panel.querySelector(sel);
+            if (inp) {
+              inp.disabled = !!disabled;
+            }
+          });
+      }
+
+      function applyDemoInputDefaults(panel, metrics, statusData) {
+        if (!panel || demoInputsPrefillDone) {
+          return;
+        }
+        var totalInp = panel.querySelector('#zuul-rl-total-changes');
+        var failsInp = panel.querySelector('#zuul-rl-gate-failures');
+        if (!totalInp || !failsInp) {
+          return;
+        }
+        var src = statusData || metrics || {};
+        var changes = numOrNull(src.default_total_changes);
+        if (changes == null) {
+          changes = numOrNull(src.demo_change_count);
+        }
+        if (changes == null) {
+          changes = DEMO_CHANGE_COUNT;
+        }
+        var fails = numOrNull(src.default_gate_failures);
+        if (fails == null) {
+          fails = numOrNull(src.default_expected_failures);
+        }
+        if (fails == null) {
+          fails = numOrNull(src.expected_failures);
+        }
+        if (fails == null) {
+          fails = DEMO_EXPECTED_FAILURES;
+        }
+        DEMO_CHANGE_COUNT = Math.max(0, Math.round(changes));
+        DEMO_EXPECTED_FAILURES = Math.max(0, Math.round(fails));
+        // Sync once from server defaults unless the user already edited.
+        if (totalInp.getAttribute('data-user-edited') !== '1') {
+          totalInp.value = String(DEMO_CHANGE_COUNT);
+        }
+        if (failsInp.getAttribute('data-user-edited') !== '1') {
+          failsInp.value = String(DEMO_EXPECTED_FAILURES);
+        }
+        demoInputsPrefillDone = true;
+      }
+
+      function expectedFailuresFrom(metrics, prog) {
+        if (prog && prog.expected_failures != null &&
+            !isNaN(Number(prog.expected_failures))) {
+          return Math.max(0, Math.round(Number(prog.expected_failures)));
+        }
+        if (metrics && metrics.expected_failures != null &&
+            !isNaN(Number(metrics.expected_failures))) {
+          return Math.max(0, Math.round(Number(metrics.expected_failures)));
+        }
+        return DEMO_EXPECTED_FAILURES;
+      }
       var lastMetrics = null;
       var lastStatusData = null;
       var demoPollTimer = null;
@@ -773,22 +908,49 @@
           bar.classList.remove('zuul-rl-demo-indeterminate');
           bar.style.width = '0%';
           renderDemoWarning(panel, null);
+          setDemoInputsDisabled(panel, false);
           if (extendBtn) {
             extendBtn.style.display = 'none';
           }
           return;
         }
         block.classList.add('zuul-rl-demo-active');
+        setDemoInputsDisabled(panel, true);
+        if (prog.expected_failures != null &&
+            !isNaN(Number(prog.expected_failures))) {
+          DEMO_EXPECTED_FAILURES = Math.max(
+            0, Math.round(Number(prog.expected_failures)));
+        }
+        if (prog.total_changes != null &&
+            !isNaN(Number(prog.total_changes))) {
+          DEMO_CHANGE_COUNT = Math.max(
+            0, Math.round(Number(prog.total_changes)));
+        }
         var phase = prog.phase || 'starting';
         var label = DEMO_PHASE_LABELS[phase] || phase;
         var pct = prog.percent != null ? prog.percent : 0;
         phaseEl.textContent = label + (pct > 0 ? ' (' + pct + '%)' : '');
         var parts = [];
         var batchesDone = prog.batches_completed || 0;
-        var batchesPlan = prog.batches_planned || 0;
-        if (batchesPlan > 0 || batchesDone > 0) {
+        var batchesPlan = Math.max(prog.batches_planned || 0, batchesDone);
+        var batchCurrent = Number(prog.batch_current);
+        if (!batchCurrent || isNaN(batchCurrent)) {
+          // Fallback when older control server omits batch_current.
+          batchCurrent = prog.traffic_active
+            ? Math.max(batchesDone, batchesPlan > 0 ? 1 : 0)
+            : batchesDone;
+        }
+        var batchTipEl = panel.querySelector('#zuul-rl-demo-batch-tip');
+        if (batchesPlan > 0 || batchesDone > 0 || batchCurrent > 0) {
+          var showX = Math.max(batchCurrent, batchesDone);
+          var showY = Math.max(batchesPlan, showX);
           parts.push(
-            'Batch ' + batchesDone + '/' + Math.max(batchesPlan, batchesDone));
+            'Batch ' + showX + ' of ' + showY +
+            ' \u2014 submitting changes in groups');
+          if (detailEl) {
+            detailEl.title =
+              'X = current batch index · Y = planned batches for this demo';
+          }
         }
         if (prog.changes_submitted > 0) {
           parts.push(prog.changes_submitted + ' changes');
@@ -797,7 +959,7 @@
           parts.push('~' + formatMmSs(prog.time_remaining_s) + ' left');
         }
         if (prog.failures_so_far > 0) {
-          parts.push(prog.failures_so_far + ' gate failures');
+          parts.push(prog.failures_so_far + ' stamped fails');
         }
         if (prog.extra_in_flight > 0) {
           parts.push('+' + prog.extra_in_flight + ' extra in flight');
@@ -811,6 +973,49 @@
           parts.push(prog.elapsed_s + 's elapsed');
         }
         detailEl.textContent = parts.join(' \u00b7 ');
+        if (batchTipEl) {
+          var tip = prog.batches_plan_tip || '';
+          if (!tip && batchesPlan > 0) {
+            var interval = prog.batch_interval_sec || 20;
+            var duration = prog.duration_sec || 300;
+            var batchSize = prog.batch_size || DEMO_BATCH_SIZE || 10;
+            if (prog.total_changes != null && Number(prog.total_changes) > 0) {
+              tip = 'Y = ' + batchesPlan + ': ' + prog.total_changes +
+                ' changes \u00f7 ' + batchSize + ' per batch';
+            } else {
+              var mins = Math.max(1, Math.round(Number(duration) / 60));
+              tip = 'Y = ' + batchesPlan + ': ~' + mins +
+                ' min session \u00f7 ' + Math.round(Number(interval)) +
+                's interval';
+            }
+          }
+          if (tip) {
+            batchTipEl.textContent = tip;
+            batchTipEl.style.display = '';
+            batchTipEl.title =
+              'Y is planned batches: defaults ~5 min session \u00f7 ~20s ' +
+              'interval \u2248 15, or Changes \u00f7 batch size when set.';
+          } else {
+            batchTipEl.textContent = '';
+            batchTipEl.style.display = 'none';
+            batchTipEl.removeAttribute('title');
+          }
+        }
+        // Keep Session summary Failures X/Y + Submitted in sync with progress.
+        var failCard = panel.querySelector('#zuul-rl-hl-failures');
+        if (failCard) {
+          var failX = 0;
+          if (lastMetrics) {
+            failX = getSessionSummary(lastMetrics).gate_failures || 0;
+          }
+          failCard.textContent = failX + '/' + DEMO_EXPECTED_FAILURES;
+        }
+        var submittedCard = panel.querySelector('#zuul-rl-hl-submitted');
+        if (submittedCard && prog.changes_submitted != null &&
+            !isNaN(Number(prog.changes_submitted))) {
+          submittedCard.textContent = String(
+            Math.max(0, Math.round(Number(prog.changes_submitted))));
+        }
         if (extendBtn) {
           var showExtend = !!(prog.extend_available || prog.traffic_active ||
             (demoRunning && phase === 'submitting_traffic'));
@@ -848,6 +1053,8 @@
       function startDemoPolling() {
         demoRunning = true;
         onDemoRunningChanged();
+        var panel = document.getElementById(PANEL_ID);
+        setDemoInputsDisabled(panel, true);
         if (demoPollTimer) {
           clearInterval(demoPollTimer);
         }
@@ -871,6 +1078,8 @@
           demoLiveMetricsTimer = null;
         }
         renderDemoProgress(null);
+        var panel = document.getElementById(PANEL_ID);
+        setDemoInputsDisabled(panel, false);
         onDemoRunningChanged();
       }
 
@@ -932,10 +1141,6 @@
           var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
           var extraCanvas = panel.querySelector('#zuul-rl-extra-chart');
           var failuresEl = panel.querySelector('#zuul-rl-failures');
-          var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
-          var effValueEl = panel.querySelector('#zuul-rl-efficiency-value');
-          var effDetailEl = panel.querySelector('#zuul-rl-efficiency-detail');
-          var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
           var compareEl = panel.querySelector('#zuul-rl-comparison');
           var status = panel.querySelector('#zuul-rl-status');
 
@@ -971,131 +1176,66 @@
 
           drawExtraBarChart(extraCanvas, metrics.failures || []);
 
-          var eff = formatEfficiency(metrics);
-          if (effValueEl) {
-            effValueEl.textContent = eff.text;
-            effValueEl.title = eff.tooltip || '';
-            effValueEl.className = 'zuul-rl-efficiency-value' +
-              (eff.na ? ' zuul-rl-eff-na' : '');
-          }
-          if (effDetailEl) {
-            effDetailEl.textContent = eff.detail;
-            effDetailEl.title = eff.tooltip || '';
-          }
-
-          renderFailureCounter(failCounterEl, metrics.failure_counts);
-          renderFailures(failuresEl, metrics.failures, metrics.failure_counts);
-          renderEffectivenessMetrics(effectivenessEl, metrics.effectiveness);
-          renderHighlightCards(panel, metrics);
+          renderFailures(
+            failuresEl, metrics.failures, metrics.failure_counts, metrics);
+          renderSessionSummary(panel, metrics);
+          renderLiveLine(panel, metrics);
           renderComparisonTable(compareEl, metrics);
-          renderBenefitStory(panel, metrics);
           renderDecisionReason(panel, metrics);
-          renderQueueSaturation(panel, metrics);
-          renderFinalSummary(panel, metrics);
 
-          if (status && metrics.latest) {
-            var latest = metrics.latest;
-            var failN = (metrics.failure_counts &&
-              metrics.failure_counts.gate_jobs_total) || 0;
-            var targetN = metrics.demo_change_count || DEMO_CHANGE_COUNT;
-            var extra = latest.extra_in_flight != null ?
-              latest.extra_in_flight :
-              (latest.changes_in_window_delta != null ?
-                latest.changes_in_window_delta :
-                Math.max(0, (latest.changes_in_window_rl || 0) -
-                  (latest.changes_in_window_tcp || 0)));
-            var adv = latest.rl_advantage_pct != null ?
-              latest.rl_advantage_pct : latest.throughput_efficiency_pct;
-            var saved = formatMinutesSaved(latest.minutes_saved);
-            var story;
-            if (failN <= 0) {
-              story = demoRunning ?
-                'Continuous demo — adaptive batches every 20s (check \u2192 Verified+1 \u2192 gate); waiting for first gate failure\u2026' :
-                'Ready — Run demo: ~5 min continuous adaptive traffic (half fail + half pass per batch). Use Extend session for more.';
-            } else if (adv != null && adv > 0) {
-              story = 'After ' + failN + ' failure' + (failN === 1 ? '' : 's') +
-                ', RL advantage ' + adv + '% — ' + extra +
-                ' extra in flight vs TCP' +
-                (latest.minutes_saved >= 0.1 ?
-                  ' (~' + saved + ' min saved est.).' : '.');
-            } else if (latest.rl_window > latest.tcp_window) {
-              story = 'After ' + failN + ' failure' + (failN === 1 ? '' : 's') +
-                ', RL holds window ' + latest.rl_window +
-                ' while TCP shrunk to ' + latest.tcp_window +
-                ' (queue ' + (latest.gate_queue_count || 0) +
-                ', extra ' + extra + ').';
+          if (status && metrics.latest && !status.classList.contains('zuul-rl-status-error')) {
+            // Ops-only status — metrics live in Session / Live sections.
+            if (demoRunning) {
+              status.textContent =
+                'Demo running — progress above; session & live below.';
+              status.className = 'zuul-rl-status-line zuul-rl-status-running';
+            } else if ((getSessionSummary(metrics).gate_failures || 0) > 0 ||
+                       metrics.demo_phase === 'done') {
+              status.textContent =
+                metrics.demo_phase === 'done' ?
+                  'Demo complete — session summary below.' :
+                  'Live — session & live metrics below.';
+              status.className = 'zuul-rl-status-line zuul-rl-status-live';
             } else {
-              story = 'Failures: ' + failN +
-                ' — RL ' + latest.rl_window + ' / TCP ' + latest.tcp_window +
-                ' (watching for RL>TCP divergence).';
+              status.textContent =
+                'Ready — Run demo for a ~5 min continuous traffic session.';
+              status.className = 'zuul-rl-status-line';
             }
-            status.textContent = story;
-            status.className = 'zuul-rl-status-line ' +
-              (demoRunning ? 'zuul-rl-status-running' : 'zuul-rl-status-live');
           }
         });
       }
 
-      function renderBenefitStory(panel, metrics) {
-        var el = panel.querySelector('#zuul-rl-benefit-story');
+      function renderLiveLine(panel, metrics) {
+        var el = panel.querySelector('#zuul-rl-live-line');
         if (!el) {
           return;
         }
+        var summary = getSessionSummary(metrics);
+        var live = summary.live || {};
         var latest = (metrics && metrics.latest) || {};
-        var counts = (metrics && metrics.failure_counts) || {};
-        var failN = counts.gate_jobs_total || 0;
-        if (latest.rl_window == null || latest.tcp_window == null) {
-          el.style.display = 'none';
+        var rlWin = live.rl_window != null ? live.rl_window : latest.rl_window;
+        var tcpWin = live.tcp_window != null ? live.tcp_window : latest.tcp_window;
+        if (rlWin == null || tcpWin == null) {
+          el.className = '';
+          el.textContent = 'Live: waiting for window data\u2026';
           return;
         }
-        var rlWin = latest.rl_window;
-        var tcpWin = latest.tcp_window;
-        var q = latest.gate_queue_count != null ? latest.gate_queue_count : 0;
-        var rlIn = latest.changes_in_window_rl != null ?
-          latest.changes_in_window_rl : Math.min(q, rlWin);
-        var tcpIn = latest.changes_in_window_tcp != null ?
-          latest.changes_in_window_tcp : Math.min(q, tcpWin);
-        var extra = latest.extra_in_flight != null ?
-          latest.extra_in_flight : Math.max(0, rlIn - tcpIn);
-        var saved = formatMinutesSaved(latest.minutes_saved);
-        var windowsDiverged = rlWin > tcpWin;
-        var html;
-        if (failN <= 0 && extra <= 0 && !windowsDiverged) {
-          if (!demoRunning) {
-            el.style.display = 'none';
-            return;
-          }
-          html = '<div class="zuul-rl-benefit-headline">RL benefit</div>' +
-            'Windows at baseline (RL ' + rlWin + ' / TCP ' + tcpWin +
-            ') — divergence appears after the first gate failure\u2026';
-        } else if (windowsDiverged && extra <= 0) {
-          // Windows differ but the queue is too shallow to show it as
-          // in-flight counts — show the window sizes, never a misleading
-          // "N vs N" when RL is actually holding a bigger window.
-          html = '<div class="zuul-rl-benefit-headline">RL benefit right now</div>' +
-            '<span class="zuul-rl-benefit-numbers">' +
-            'RL window <span class="zuul-rl-benefit-rl">' + rlWin +
-            '</span> vs TCP <span class="zuul-rl-benefit-tcp">' + tcpWin +
-            '</span> (+' + (rlWin - tcpWin) + ' capacity RL kept open)</span>' +
-            '<div>Gate queue only ' + q + ' deep — topping up traffic so ' +
-            'both windows fill; the in-flight gap will equal the window ' +
-            'gap once queue \u2265 ' + rlWin + '.</div>';
-        } else {
-          html = '<div class="zuul-rl-benefit-headline">RL benefit right now</div>' +
-            '<span class="zuul-rl-benefit-numbers">' +
-            'TCP would run <span class="zuul-rl-benefit-tcp">' + tcpIn +
-            '</span> in parallel \u2014 RL is running ' +
-            '<span class="zuul-rl-benefit-rl">' + rlIn + '</span>' +
-            (extra > 0 ? ' (<span class="zuul-rl-benefit-rl">+' + extra +
-              ' extra</span>)' : '') +
-            ' \u2192 <span class="zuul-rl-benefit-saved">~' + saved +
-            ' min saved</span> so far</span>' +
-            '<div>' + failN + ' gate failure' + (failN === 1 ? '' : 's') +
-            ' \u00b7 RL window ' + rlWin + ' vs TCP ' + tcpWin +
-            ' \u00b7 gate queue ' + q + '</div>';
-        }
-        el.innerHTML = html;
-        el.style.display = 'block';
+        var q = live.gate_queue_count != null ? live.gate_queue_count :
+          (latest.gate_queue_count != null ? latest.gate_queue_count : 0);
+        var liveExtra = live.extra_in_flight != null ? live.extra_in_flight : 0;
+        var maxWin = Math.max(rlWin, tcpWin || 0);
+        var target = latest.queue_target != null ? latest.queue_target : maxWin;
+        var saturated = latest.queue_saturated != null ?
+          latest.queue_saturated : (q >= maxWin && maxWin > 0);
+        el.className = saturated ? 'zuul-rl-sat-ok' : 'zuul-rl-sat-low';
+        el.innerHTML =
+          '<strong>Live</strong> · RL <span class="zuul-rl-live-rl">' + rlWin +
+          '</span> / TCP <span class="zuul-rl-live-tcp">' + tcpWin +
+          '</span> · queue ' + q +
+          (liveExtra > 0 ? ' · +' + liveExtra + ' extra in flight' : '') +
+          (saturated ?
+            ' · saturated' :
+            ' · topping up (queue &lt; ' + target + ')');
       }
 
       function renderDecisionReason(panel, metrics) {
@@ -1106,191 +1246,165 @@
         var latest = (metrics && metrics.latest) || {};
         var reason = latest.rl_decision_reason;
         var source = latest.rl_decision_source;
+        var detail = latest.rl_decision_detail;
+        function esc(s) {
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+        }
         if (reason) {
-          el.innerHTML = '<span class="zuul-rl-reason-label">RL' +
-            (source ? ' [' + String(source)
-              .replace(/&/g, '&amp;').replace(/</g, '&lt;') + ']' : '') +
-            ':</span> ' +
-            String(reason)
-              .replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          // Plain-English reason only; method/kNN behind Details.
+          var tipParts = [];
+          if (source) {
+            tipParts.push('method: ' + source);
+          }
+          if (detail) {
+            tipParts.push(String(detail));
+          }
+          var tip = tipParts.length ? tipParts.join(' \u00b7 ') : '';
+          var wasOpen = false;
+          var prevDetails = el.querySelector('details.zuul-rl-reason-debug');
+          if (prevDetails && prevDetails.open) {
+            wasOpen = true;
+          }
+          var html = '<span class="zuul-rl-reason-label">RL:</span> ' +
+            esc(reason);
+          if (tip) {
+            html +=
+              ' <details class="zuul-rl-reason-debug"' +
+              (wasOpen ? ' open' : '') + '>' +
+              '<summary>Details</summary>' +
+              '<span class="zuul-rl-reason-debug-body">' + esc(tip) +
+              '</span></details>';
+            el.title = tip;
+          } else {
+            el.removeAttribute('title');
+          }
+          el.innerHTML = html;
         } else {
           el.innerHTML = '<span class="zuul-rl-reason-label">RL:</span> ' +
             'waiting for first agent tick\u2026';
+          el.removeAttribute('title');
         }
       }
 
-      function renderQueueSaturation(panel, metrics) {
-        var el = panel.querySelector('#zuul-rl-queue-saturation');
-        if (!el) {
-          return;
-        }
-        var latest = (metrics && metrics.latest) || {};
-        var q = latest.gate_queue_count != null ? latest.gate_queue_count : null;
-        if (q == null || latest.rl_window == null) {
-          el.className = '';
-          el.textContent = 'Queue saturation: waiting for data\u2026';
-          return;
-        }
-        var maxWin = Math.max(latest.rl_window, latest.tcp_window || 0);
-        var target = latest.queue_target != null ?
-          latest.queue_target : maxWin;
-        var saturated = latest.queue_saturated != null ?
-          latest.queue_saturated : (q >= maxWin && maxWin > 0);
-        if (saturated) {
-          el.className = 'zuul-rl-sat-ok';
-          el.textContent = '\u2713 Queue saturated (' + q + ' \u2265 max ' +
-            'window ' + maxWin + ') — window comparison fully valid';
-        } else {
-          el.className = 'zuul-rl-sat-low';
-          el.textContent = '\u25f4 Queue draining (' + q + ' < target ' +
-            target + ') — topping up traffic to refill both windows';
-        }
-      }
-
-      function renderFinalSummary(panel, metrics) {
-        var el = panel.querySelector('#zuul-rl-final-summary');
-        if (!el) {
-          return;
-        }
-        var done = metrics && metrics.demo_phase === 'done' && !demoRunning;
-        if (!done) {
-          el.style.display = 'none';
-          el.innerHTML = '';
-          return;
-        }
-        var latest = metrics.latest || {};
-        var counts = metrics.failure_counts || {};
-        var adv = metrics.advantage || {};
-        var eff = metrics.effectiveness || {};
-        var failN = counts.gate_jobs_total || 0;
-        var extraTotal = adv.extra_changes_total != null ?
-          adv.extra_changes_total : 0;
-        var saved = formatMinutesSaved(
-          eff.minutes_saved != null ? eff.minutes_saved : latest.minutes_saved);
-        var advPct = adv.rl_advantage_pct != null ? adv.rl_advantage_pct : 0;
-        var merged = eff.session_changes_merged != null ?
-          eff.session_changes_merged : 0;
-        el.innerHTML =
-          '<div class="zuul-rl-final-title">\u2713 Demo complete — RL kept the ' +
-          'gate open while TCP backed off</div>' +
-          '<div class="zuul-rl-final-chips">' +
-          '<span class="zuul-rl-final-chip">' + failN +
-          ' gate failures</span>' +
-          '<span class="zuul-rl-final-chip">RL ' +
-          (latest.rl_window != null ? latest.rl_window : '?') +
-          ' vs TCP ' +
-          (latest.tcp_window != null ? latest.tcp_window : '?') +
-          ' final windows</span>' +
-          '<span class="zuul-rl-final-chip">+' + extraTotal +
-          ' extra change-slots</span>' +
-          '<span class="zuul-rl-final-chip">~' + saved +
-          ' min saved</span>' +
-          '<span class="zuul-rl-final-chip">' + advPct +
-          '% RL advantage</span>' +
-          '<span class="zuul-rl-final-chip">' + merged +
-          ' changes merged</span>' +
-          '</div>';
-        el.style.display = 'block';
-      }
-
-      function renderHighlightCards(panel, metrics) {
+      function renderSessionSummary(panel, metrics) {
         if (!panel || !metrics) {
           return;
         }
-        var latest = metrics.latest || {};
-        var counts = metrics.failure_counts || {};
-        var adv = metrics.advantage || {};
-        var eff = metrics.effectiveness || {};
-        var targetN = metrics.demo_change_count || DEMO_CHANGE_COUNT;
-        var failN = counts.gate_jobs_total || 0;
-        // Live extra in flight (queue-aware); fall back to session total.
-        var liveExtra = latest.extra_in_flight != null ?
-          latest.extra_in_flight :
-          (latest.changes_in_window_delta != null ?
-            latest.changes_in_window_delta :
-            (eff.changes_in_window_delta != null ?
-              eff.changes_in_window_delta : 0));
-        var sessionExtra = latest.extra_changes_total != null ?
-          latest.extra_changes_total :
-          (adv.extra_changes_total != null ? adv.extra_changes_total : 0);
-        var tips = {
-          failures: 'Gate job failures this session. Fail rule: half of each '
-            + 'batch is stamped should_fail=true (deterministic ratio, '
-            + 'adaptive batch sizes).',
-          rl: 'RL applied gate window (active). Holds through failures so it stays above TCP.',
-          tcp: 'Traditional TCP shadow window (not applied). Shrinks on gate failures.',
-          extra: 'Live Extra in flight = max(0, min(queue, RL) − min(queue, TCP)). '
-            + 'Needs gate queue deeper than TCP window. Session extras at failures: '
-            + sessionExtra + '.',
-          saved: (latest.minutes_saved_formula || eff.minutes_saved_formula ||
-            'sum(max(0, RL−TCP_after) at failures) × avg_job_duration / 60, '
-            + 'capped at session wall-clock minutes')
-        };
+        var summary = getSessionSummary(metrics);
+        var targetN = expectedFailuresFrom(metrics, null);
+        DEMO_EXPECTED_FAILURES = targetN;
+        var failN = summary.gate_failures || 0;
+        var sessionExtra = summary.extra_changes_total || 0;
+        var advPct = summary.rl_advantage_pct;
+        var heldRl = summary.rl_held_peak;
+        var heldTcp = summary.tcp_after_floor;
+        var merged = summary.merged != null ?
+          summary.merged : (summary.session_changes_merged || 0);
+        var submitted = summary.changes_submitted != null ?
+          summary.changes_submitted : (summary.submitted || 0);
         var el;
+
+        el = panel.querySelector('#zuul-rl-hl-submitted');
+        if (el) {
+          el.textContent = String(submitted != null && !isNaN(Number(submitted)) ?
+            submitted : 0);
+        }
+        el = panel.querySelector('#zuul-rl-hl-merged');
+        if (el) {
+          el.textContent = String(merged != null && !isNaN(Number(merged)) ?
+            merged : 0);
+        }
         el = panel.querySelector('#zuul-rl-hl-failures');
         if (el) {
-          el.textContent = failN + (targetN ? '/' + targetN : '');
-        }
-        el = panel.querySelector('#zuul-rl-hl-rl');
-        if (el) {
-          el.textContent = latest.rl_window != null ? latest.rl_window : '—';
-        }
-        el = panel.querySelector('#zuul-rl-hl-tcp');
-        if (el) {
-          el.textContent = latest.tcp_window != null ? latest.tcp_window : '—';
+          el.textContent = failN + '/' + targetN;
         }
         el = panel.querySelector('#zuul-rl-hl-extra');
         if (el) {
-          el.textContent = String(liveExtra);
+          el.textContent = String(sessionExtra);
         }
-        el = panel.querySelector('#zuul-rl-hl-saved');
+        el = panel.querySelector('#zuul-rl-hl-adv');
         if (el) {
-          el.textContent = formatMinutesSaved(latest.minutes_saved);
-        }
-        el = panel.querySelector('#zuul-rl-hl-queue');
-        if (el) {
-          var qDepth = latest.gate_queue_count != null ?
-            latest.gate_queue_count : null;
-          el.textContent = qDepth != null ? String(qDepth) : '\u2014';
-          var qCard = panel.querySelector('.zuul-rl-hl-queue');
-          if (qCard && qDepth != null && latest.rl_window != null) {
-            var qMax = Math.max(latest.rl_window, latest.tcp_window || 0);
-            var qSat = latest.queue_saturated != null ?
-              latest.queue_saturated : (qDepth >= qMax && qMax > 0);
-            qCard.classList.toggle('zuul-rl-sat-ok', !!qSat);
-            qCard.classList.toggle('zuul-rl-sat-low', !qSat);
+          var idle = sessionExtra <= 0 && failN <= 0;
+          if (advPct == null || isNaN(Number(advPct)) ||
+              (Number(advPct) === 0 && idle)) {
+            el.textContent = '\u2014';
+          } else {
+            el.textContent = Number(advPct) + '%' +
+              (summary.advantage_capped ? '*' : '');
           }
         }
-        el = panel.querySelector('#zuul-rl-debug-line');
+        el = panel.querySelector('#zuul-rl-hl-peak');
         if (el) {
-          var q = latest.gate_queue_count != null ? latest.gate_queue_count : '—';
-          el.textContent =
-            'RL ' + (latest.rl_window != null ? latest.rl_window : '—') +
-            ' · TCP ' + (latest.tcp_window != null ? latest.tcp_window : '—') +
-            ' · queue ' + q +
-            ' · extra in flight ' + liveExtra +
-            ' · in-window RL/TCP ' +
-            (latest.changes_in_window_rl != null ?
-              latest.changes_in_window_rl : '—') +
-            '/' +
-            (latest.changes_in_window_tcp != null ?
-              latest.changes_in_window_tcp : '—');
+          if (heldRl != null && heldTcp != null &&
+              !isNaN(Number(heldRl)) && !isNaN(Number(heldTcp))) {
+            el.textContent = heldRl + ' / ' + heldTcp;
+          } else {
+            el.textContent = '\u2014';
+          }
+        }
+
+        var doneBanner = panel.querySelector('#zuul-rl-done-banner');
+        if (doneBanner) {
+          var done = metrics.demo_phase === 'done' && !demoRunning;
+          doneBanner.style.display = done ? 'block' : 'none';
+          if (done) {
+            doneBanner.textContent =
+              '\u2713 Demo complete — RL kept the gate open while TCP backed off';
+          }
+        }
+
+        var tipAdv = (summary.advantage_formula ||
+          'sum(extra at failures) / sum(TCP_after at failures) \u00d7 100') +
+          (summary.advantage_capped ?
+            ' (*display capped; raw ' + summary.rl_advantage_pct_raw + '%)' : '');
+        var tipPeak =
+          'Session peak at gate failures (not live): max RL held vs min TCP after shrink. ' +
+          'Live RL/TCP are in the Live & decision section.';
+        var tipExtra =
+          'Session total extras accommodated vs TCP = sum over failures of ' +
+          'max(0, RL_held \u2212 TCP_after). Same basis as job-runs saved (~1s gate jobs).';
+        if (summary.minutes_saved != null && summary.minutes_saved > 0) {
+          tipExtra += ' (\u2248 ' + formatMinutesSaved(summary.minutes_saved) +
+            ' min at ~' +
+            (summary.avg_gate_job_duration_sec || 1) + 's/job)';
         }
         var card;
-        card = panel.querySelector('.zuul-rl-hl-fail');
-        if (card) { card.title = tips.failures; }
-        card = panel.querySelector('.zuul-rl-hl-rl');
-        if (card) { card.title = tips.rl; }
-        card = panel.querySelector('.zuul-rl-hl-tcp');
-        if (card) { card.title = tips.tcp; }
-        var winCards = panel.querySelectorAll('.zuul-rl-hl-win');
-        if (winCards[0]) { winCards[0].title = tips.extra; }
-        if (winCards[1]) { winCards[1].title = tips.saved; }
-        if (metrics.demo_change_count) {
-          DEMO_CHANGE_COUNT = metrics.demo_change_count;
+        card = panel.querySelector('.zuul-rl-hl-submitted');
+        if (card) {
+          card.title =
+            'Total changes submitted this demo session (demo traffic).';
         }
-        if (metrics.expected_failures) {
-          DEMO_EXPECTED_FAILURES = metrics.expected_failures;
+        card = panel.querySelector('.zuul-rl-hl-merged');
+        if (card) {
+          card.title = 'Successful gate merges this session.';
+        }
+        card = panel.querySelector('.zuul-rl-hl-fail');
+        if (card) {
+          card.title =
+            'Failed (gate) / in conflict: stamped should_fail gate jobs and ' +
+            'speculative merge failures (not git merge-conflict machinery). ' +
+            'Shown as actual / expected. Feeds extras & job-runs saved.';
+        }
+        card = panel.querySelector('.zuul-rl-hl-extra');
+        if (card) {
+          card.title = tipExtra;
+        }
+        card = panel.querySelector('.zuul-rl-hl-adv');
+        if (card) {
+          card.title = tipAdv;
+        }
+        card = panel.querySelector('.zuul-rl-hl-peak');
+        if (card) {
+          card.title = tipPeak;
+        }
+
+        if (metrics.demo_change_count != null &&
+            !isNaN(Number(metrics.demo_change_count))) {
+          DEMO_CHANGE_COUNT = Math.max(
+            0, Math.round(Number(metrics.demo_change_count)));
         }
         if (metrics.demo_batch_size) {
           DEMO_BATCH_SIZE = metrics.demo_batch_size;
@@ -1306,29 +1420,108 @@
         }
         var cmp = metrics && metrics.comparison;
         var phase = metrics && metrics.demo_phase;
-        var show = cmp && (phase === 'done' ||
-          (metrics.failures && metrics.failures.length > 0));
+        var summary = getSessionSummary(metrics);
+        var show = (phase === 'done' || (cmp && metrics.failures &&
+          metrics.failures.length > 0)) && !demoRunning;
         if (!show) {
           container.style.display = 'none';
           container.innerHTML = '';
           return;
         }
         container.style.display = 'block';
-        var html = '<div class="zuul-rl-chart-title" title="' +
-          'Side-by-side outcome if only TCP shrank vs with the RL agent.">' +
-          'Comparison after run (TCP only vs RL)</div><table><thead><tr>';
-        (cmp.columns || []).forEach(function (c) {
-          html += '<th>' + c + '</th>';
-        });
-        html += '</tr></thead><tbody>';
-        (cmp.rows || []).forEach(function (row) {
-          html += '<tr><td>' + row.metric + '</td><td>' + row.tcp_only +
-            '</td><td>' + row.with_rl + '</td><td class="zuul-rl-benefit">' +
-            row.benefit + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        if (cmp.summary) {
-          html += '<div class="zuul-rl-compare-summary">' + cmp.summary + '</div>';
+        var expectedN = expectedFailuresFrom(metrics, null);
+        var failN = summary.gate_failures || 0;
+        var extras = summary.extra_changes_total || 0;
+        var jobRuns = summary.job_runs_saved != null ?
+          summary.job_runs_saved : extras;
+        var advPct = summary.rl_advantage_pct;
+        var heldRl = summary.rl_held_peak;
+        var heldTcp = summary.tcp_after_floor;
+        var merged = summary.merged != null ?
+          summary.merged : (summary.session_changes_merged || 0);
+        var submitted = summary.changes_submitted != null ?
+          summary.changes_submitted : (summary.submitted || 0);
+        if (cmp) {
+          if (cmp.gate_failures != null) {
+            failN = cmp.gate_failures;
+          }
+          if (cmp.expected_failures != null) {
+            expectedN = cmp.expected_failures;
+          }
+          if (cmp.extra_changes_total != null) {
+            extras = cmp.extra_changes_total;
+          }
+          if (cmp.job_runs_saved != null) {
+            jobRuns = cmp.job_runs_saved;
+          }
+          if (cmp.rl_advantage_pct != null) {
+            advPct = cmp.rl_advantage_pct;
+          }
+          if (cmp.rl_held_peak != null) {
+            heldRl = cmp.rl_held_peak;
+          }
+          if (cmp.tcp_after_floor != null) {
+            heldTcp = cmp.tcp_after_floor;
+          }
+          if (cmp.merged != null) {
+            merged = cmp.merged;
+          } else if (cmp.session_changes_merged != null) {
+            merged = cmp.session_changes_merged;
+          }
+          if (cmp.changes_submitted != null) {
+            submitted = cmp.changes_submitted;
+          } else if (cmp.submitted != null) {
+            submitted = cmp.submitted;
+          }
+        }
+        function esc(s) {
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+        }
+        var advText = (advPct == null || isNaN(Number(advPct))) ?
+          '\u2014' : (Number(advPct) + '%');
+        var peakText = (heldRl != null && heldTcp != null) ?
+          (heldRl + ' / ' + heldTcp) : '\u2014';
+        var html = '<div class="zuul-rl-after-run">' +
+          '<div class="zuul-rl-after-run-title">After run</div>' +
+          '<div class="zuul-rl-after-run-grid">' +
+          '<span class="label">Submitted</span>' +
+          '<span class="value">' + esc(submitted) + '</span>' +
+          '<span class="label">Merged</span>' +
+          '<span class="value">' + esc(merged) + '</span>' +
+          '<span class="label">Failed (gate) / expected</span>' +
+          '<span class="value">' + esc(failN + '/' + expectedN) + '</span>' +
+          '<span class="label">Extra accommodated vs TCP</span>' +
+          '<span class="value">' + esc(extras) + '</span>' +
+          '<span class="label">RL peak / TCP floor</span>' +
+          '<span class="value">' + esc(peakText) + '</span>' +
+          '<span class="label">Job-runs saved</span>' +
+          '<span class="value">' + esc(jobRuns) + '</span>' +
+          '<span class="label">Advantage</span>' +
+          '<span class="value">' + esc(advText) + '</span>' +
+          '</div>';
+        if (cmp && cmp.summary) {
+          html += '<div class="zuul-rl-compare-summary">' +
+            esc(cmp.summary) + '</div>';
+        }
+        html += '</div>';
+        if (cmp && cmp.rows && cmp.rows.length) {
+          html += '<div class="zuul-rl-chart-title" style="margin-top:8px" title="' +
+            'Side-by-side outcome if only TCP shrank vs with the RL agent.">' +
+            'Comparison detail (TCP only vs RL)</div><table><thead><tr>';
+          (cmp.columns || []).forEach(function (c) {
+            html += '<th>' + esc(c) + '</th>';
+          });
+          html += '</tr></thead><tbody>';
+          (cmp.rows || []).forEach(function (row) {
+            html += '<tr><td>' + esc(row.metric) + '</td><td>' +
+              esc(row.tcp_only) + '</td><td>' + esc(row.with_rl) +
+              '</td><td class="zuul-rl-benefit">' + esc(row.benefit) +
+              '</td></tr>';
+          });
+          html += '</tbody></table>';
         }
         container.innerHTML = html;
       }
@@ -1352,6 +1545,7 @@
           var metrics = results[0];
           var st = results[1];
           var prog = results[2];
+          applyDemoInputDefaults(panel, metrics, st);
           if (metrics) {
             lastMetrics = metrics;
             panel.style.display = 'block';
@@ -1388,112 +1582,11 @@
         return String(Math.round(value * 10) / 10);
       }
 
-      function windowChangesNote(latest) {
-        if (!latest) {
-          return '';
+      function formatJobRunsSaved(value) {
+        if (value == null || isNaN(value)) {
+          return '0';
         }
-        var rl = latest.changes_in_window_rl;
-        var tcp = latest.changes_in_window_tcp;
-        if (rl == null && tcp == null) {
-          return '';
-        }
-        return ' \u00b7 RL ' + (rl != null ? rl : '?') +
-          ' in window / TCP ' + (tcp != null ? tcp : '?') + ' in window';
-      }
-
-      function renderEffectivenessMetrics(container, effectiveness) {
-        if (!container) {
-          return;
-        }
-        var eff = effectiveness || {};
-        var minutes = formatMinutesSaved(eff.minutes_saved);
-        var changeSlotSec = eff.cumulative_change_slot_seconds != null ?
-          eff.cumulative_change_slot_seconds :
-          (eff.cumulative_slot_seconds != null ? eff.cumulative_slot_seconds : 0);
-        var rlInWindow = eff.changes_in_window_rl != null ?
-          eff.changes_in_window_rl : 0;
-        var tcpInWindow = eff.changes_in_window_tcp != null ?
-          eff.changes_in_window_tcp : 0;
-        var gateQueued = eff.gate_queue_count != null ?
-          eff.gate_queue_count : 0;
-        var jobDur = eff.avg_gate_job_duration_sec != null ?
-          eff.avg_gate_job_duration_sec : 1;
-        var jobSrc = eff.job_duration_source === 'measured' ?
-          'measured from finished gate builds (success + failure)' :
-          'demo default (~1s gate job)';
-        var formula = eff.minutes_saved_formula ||
-          'sum_over_failures(max(0, RL_held \u2212 TCP_after)) \u00d7 avg_job_duration / 60, capped at session wall-clock minutes';
-        var merged = eff.session_changes_merged != null ?
-          eff.session_changes_merged : 0;
-        var mergedNote = eff.session_changes_merged_note ||
-          'Successful gate merges; expect ~5/10 pass per batch';
-        var inWindowDelta = eff.changes_in_window_delta != null ?
-          eff.changes_in_window_delta :
-          Math.max(0, rlInWindow - tcpInWindow);
-        var failures = eff.session_gate_failures != null ?
-          eff.session_gate_failures : 0;
-        var sessionMin = eff.session_duration_min != null ?
-          eff.session_duration_min : 0;
-        var impactSummary = eff.impact_summary || '';
-
-        container.innerHTML =
-          '<div class="zuul-rl-chart-title">RL effectiveness (this session)</div>' +
-          '<div class="zuul-rl-effectiveness-grid">' +
-          '<div class="zuul-rl-effectiveness-metric zuul-rl-metric-primary">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          'Serial gate-job time avoided by extra RL parallelism vs TCP shadow. ' +
-          'Formula: ' + formula + '. ' +
-          'Uses avg gate job duration (' + jobSrc + '). ' +
-          'Cumulative change-slot-seconds: ' + changeSlotSec + '.">' +
-          'Minutes saved (est.)</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + minutes + ' min</div>' +
-          '<div class="zuul-rl-effectiveness-sub">' +
-          formula + ' \u00b7 avg job ' + jobDur + 's</div></div>' +
-          (impactSummary ?
-            '<div class="zuul-rl-impact-summary">' + impactSummary + '</div>' : '') +
-          '<div class="zuul-rl-effectiveness-metric">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          'Extra gate changes running in parallel under RL vs TCP shadow ' +
-          '(changes_in_window_RL minus changes_in_window_TCP).">' +
-          'Extra changes in flight</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + inWindowDelta + '</div></div>' +
-          '<div class="zuul-rl-effectiveness-metric">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          'Live gate changes actively parallelized under the RL applied window ' +
-          '(min of gate queue depth and RL window size). Gate queue: ' +
-          gateQueued + ' change(s).">' +
-          'Changes in RL window</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + rlInWindow + '</div></div>' +
-          '<div class="zuul-rl-effectiveness-metric">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          'Gate changes that would run in parallel under the TCP shadow window ' +
-          '(min of gate queue depth and TCP window size). Gate queue: ' +
-          gateQueued + ' change(s).">' +
-          'Changes in TCP window</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + tcpInWindow + '</div></div>' +
-          '<div class="zuul-rl-effectiveness-metric">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          mergedNote + '">' +
-          'Changes merged</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + merged + '</div>' +
-          '<div class="zuul-rl-effectiveness-sub">' + mergedNote + '</div></div>' +
-          '<div class="zuul-rl-effectiveness-metric">' +
-          '<span class="zuul-rl-effectiveness-label" title="' +
-          'Gate job failures and average gate job run time this session. ' +
-          'Job duration: ' + jobSrc + '.">' +
-          'Failures / avg job</span>' +
-          '<div class="zuul-rl-effectiveness-value">' + failures +
-          ' / ' + jobDur + 's</div>' +
-          '<div class="zuul-rl-effectiveness-sub">Session ' + sessionMin + ' min</div></div>' +
-          '</div>';
-      }
-
-      function effectivenessStatusNote(metrics) {
-        var eff = metrics && (metrics.effectiveness || metrics.latest);
-        if (!eff || eff.minutes_saved == null || eff.minutes_saved < 0.1) {
-          return '';
-        }
-        return ' \u00b7 ~' + formatMinutesSaved(eff.minutes_saved) + ' min saved';
+        return String(Math.max(0, Math.round(Number(value))));
       }
 
       function baselineMetrics() {
@@ -1505,8 +1598,11 @@
           throughput: [0],
           throughput_efficiency: [0],
           failures: [],
+          expected_failures: DEMO_EXPECTED_FAILURES,
+          demo_change_count: DEMO_CHANGE_COUNT,
           effectiveness: {
             minutes_saved: 0,
+            job_runs_saved: 0,
             cumulative_slot_seconds: 0,
             parallelism_gain: 0,
             throughput_efficiency_pct: 0,
@@ -1518,6 +1614,27 @@
             session_gate_failures: 0,
             session_duration_min: 0
           },
+          session_summary: {
+            changes_submitted: 0,
+            submitted: 0,
+            merged: 0,
+            session_changes_merged: 0,
+            gate_failures: 0,
+            extra_changes_total: 0,
+            job_runs_saved: 0,
+            minutes_saved: 0,
+            rl_advantage_pct: null,
+            rl_held_peak: null,
+            tcp_after_floor: null,
+            live: {
+              rl_window: BASELINE_WINDOW,
+              tcp_window: BASELINE_WINDOW,
+              extra_in_flight: 0,
+              gate_queue_count: 0,
+              changes_in_window_rl: 0,
+              changes_in_window_tcp: 0
+            }
+          },
           latest: {
             timestamp: ts,
             rl_window: BASELINE_WINDOW,
@@ -1525,6 +1642,7 @@
             throughput_per_min: 0,
             throughput_efficiency_pct: 0,
             minutes_saved: 0,
+            job_runs_saved: 0,
             parallelism_gain: 0,
             changes_in_window_rl: 0,
             changes_in_window_tcp: 0,
@@ -1545,11 +1663,9 @@
         var windowCanvas = panel.querySelector('#zuul-rl-window-chart');
         var throughputCanvas = panel.querySelector('#zuul-rl-throughput-chart');
         var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
+        var extraCanvas = panel.querySelector('#zuul-rl-extra-chart');
         var failuresEl = panel.querySelector('#zuul-rl-failures');
-        var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
-        var effValueEl = panel.querySelector('#zuul-rl-efficiency-value');
-        var effDetailEl = panel.querySelector('#zuul-rl-efficiency-detail');
-        var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
+        var compareEl = panel.querySelector('#zuul-rl-comparison');
         var status = panel.querySelector('#zuul-rl-status');
 
         drawLineChart(windowCanvas, [
@@ -1576,31 +1692,22 @@
           ylabel: '%'
         });
 
-        if (effValueEl) {
-          effValueEl.textContent = '0%';
-          effValueEl.className = 'zuul-rl-efficiency-value';
+        drawExtraBarChart(extraCanvas, []);
+        if (compareEl) {
+          compareEl.style.display = 'none';
+          compareEl.innerHTML = '';
         }
-        if (effDetailEl) {
-          effDetailEl.textContent =
-            'RL ' + BASELINE_WINDOW + ' / TCP ' + BASELINE_WINDOW + ' (baseline)';
-        }
+
         if (failuresEl) {
           failuresEl.innerHTML = '';
         }
-        renderFailureCounter(failCounterEl, {
-          gate_jobs_total: 0,
-          gate_cycles_total: 0,
-          tcp_shrinks_total: 0,
-          rl_shrinks_total: 0
-        });
-        renderEffectivenessMetrics(effectivenessEl, metrics.effectiveness);
-        renderHighlightCards(panel, metrics);
+        renderSessionSummary(panel, metrics);
+        renderLiveLine(panel, metrics);
+        renderDecisionReason(panel, metrics);
         if (status) {
           status.textContent =
             'Demo reset — both windows at ' + BASELINE_WINDOW +
-            '. Continuous adaptive traffic for ~5 min · half of each ' +
-            'batch fails deterministically · queue kept above ' +
-            'max(RL, TCP)\u2026';
+            '. Click Run demo to start.';
           status.className = 'zuul-rl-status-line zuul-rl-status-running';
         }
       }
@@ -1628,113 +1735,6 @@
         return q.name + ': <span class="zuul-rl-active">RL active window ' + rl +
           '</span> (applied now) · <span class="zuul-rl-tcp">TCP baseline ' + tcp +
           '</span> (shadow, not applied) · ' + modeNote + deltaStr;
-      }
-
-      function formatFailureCounts(counts) {
-        if (!counts) {
-          return {
-            line: 'Gate failures: 0 (half of each batch fails ' +
-              'deterministically)',
-            short: '',
-            hasFailures: false
-          };
-        }
-        var jobs = counts.gate_jobs_total || 0;
-        var cycles = counts.gate_cycles_total || 0;
-        var tcpShrinks = counts.tcp_shrinks_total || 0;
-        var rlShrinks = counts.rl_shrinks_total || 0;
-        var sinceTcp = counts.gate_cycles_since_tcp_shrink;
-        var sinceRl = counts.gate_jobs_since_rl_shrink;
-        var line = 'Gate failures: ' + jobs +
-          ' · ' + cycles + ' gate cycle' +
-          (cycles === 1 ? '' : 's');
-        line += ' · TCP shrinks ' + tcpShrinks + ' · RL shrinks ' + rlShrinks;
-        if (cycles > 0 && sinceTcp != null) {
-          line += ' · <span class="zuul-rl-fail-tcp">' + sinceTcp +
-            ' cycle failure' + (sinceTcp === 1 ? '' : 's') +
-            ' since last TCP shrink</span>';
-        }
-        if (jobs > 0 && sinceRl != null) {
-          line += ' · <span class="zuul-rl-fail-rl">' + sinceRl +
-            ' job failure' + (sinceRl === 1 ? '' : 's') +
-            ' since last RL shrink</span>';
-        }
-        var short = jobs + ' failures';
-        return {
-          line: line,
-          short: short,
-          hasFailures: jobs > 0 || cycles > 0
-        };
-      }
-
-      function renderFailureCounter(container, counts) {
-        if (!container) {
-          return;
-        }
-        var fmt = formatFailureCounts(counts);
-        container.innerHTML = fmt.line;
-        container.className = 'zuul-rl-failure-counter' +
-          (fmt.hasFailures ? ' zuul-rl-has-failures' : '');
-      }
-
-      function failureStatusNote(counts) {
-        var fmt = formatFailureCounts(counts);
-        return fmt.hasFailures ? ' · ' + fmt.short : '';
-      }
-
-      function formatEfficiency(metrics) {
-        var latest = metrics && metrics.latest;
-        var adv = (metrics && metrics.advantage) || {};
-        var eff = (metrics && metrics.effectiveness) || {};
-        if (!latest) {
-          return {
-            text: '0%',
-            detail: 'RL ' + BASELINE_WINDOW + ' / TCP ' + BASELINE_WINDOW +
-              ' (baseline)',
-            tooltip: 'Advantage appears after gate failures when RL holds a higher window than TCP.',
-            na: false
-          };
-        }
-        var pct = latest.rl_advantage_pct;
-        if (pct == null) {
-          pct = latest.throughput_efficiency_pct;
-        }
-        if (pct == null) {
-          pct = adv.rl_advantage_pct;
-        }
-        if (pct == null) {
-          pct = eff.rl_advantage_pct;
-        }
-        var totalExtra = latest.extra_changes_total != null ?
-          latest.extra_changes_total :
-          (adv.extra_changes_total != null ? adv.extra_changes_total : 0);
-        var formula = adv.advantage_formula ||
-          'sum(extra at failures) / sum(TCP at failures) × 100';
-        var source = adv.advantage_source || '';
-        var tooltip = formula +
-          (source ? ' [source: ' + source + ']' : '') +
-          '. Extra change-slots this session: ' + totalExtra + '.';
-        if (pct == null) {
-          return {
-            text: 'N/A',
-            detail: 'Waiting for gate failures to measure advantage',
-            tooltip: tooltip,
-            na: true
-          };
-        }
-        var detail = pct + '% session advantage · ' + totalExtra +
-          ' extra change-slot' + (totalExtra === 1 ? '' : 's') +
-          ' across failures';
-        if (latest.rl_window != null && latest.tcp_window != null) {
-          detail += ' · live RL ' + latest.rl_window +
-            ' / TCP ' + latest.tcp_window;
-        }
-        return {
-          text: pct + '%',
-          detail: detail,
-          tooltip: tooltip,
-          na: false
-        };
       }
 
       function ensureBanner() {
@@ -1812,109 +1812,97 @@
           REPORT_BASE + '/report.html">report</a></span></div>' +
           '<div id="zuul-rl-report-body">' +
 
-          // 1. Demo Control — buttons, phase, progress bar, warnings.
+          // 1. Demo Control
           section(1, 'Demo Control',
             'Start or extend the demo; live phase and progress below.',
             '<div class="zuul-rl-control-buttons">' +
+            '<label class="zuul-rl-demo-params" title="Total changes to submit (default matches empty /run-demo)">' +
+            'Changes <input id="zuul-rl-total-changes" type="number" min="0" max="500" ' +
+            'value="' + DEMO_CHANGE_COUNT + '" step="1"></label>' +
+            '<label class="zuul-rl-demo-params" title="Fails = stamped gate job failures (should_fail / demo-meta), not git merge conflicts. Default matches empty /run-demo.">' +
+            'Fails <input id="zuul-rl-gate-failures" type="number" min="0" max="500" ' +
+            'value="' + DEMO_EXPECTED_FAILURES + '" step="1"></label>' +
             '<button id="zuul-rl-run-btn" type="button">Run demo</button>' +
             '<button id="zuul-rl-extend-btn" type="button" title="Add 1 more batch of changes (does not cancel in-flight builds)" style="display:none">Extend session</button>' +
             '</div>' +
+            '<div class="zuul-rl-param-tip">Fails = gate job failures (stamped), not merge conflicts</div>' +
             '<div id="zuul-rl-demo-progress">' +
             '<div id="zuul-rl-demo-phase">Starting demo\u2026</div>' +
             '<div id="zuul-rl-demo-detail"></div>' +
+            '<div id="zuul-rl-demo-batch-tip" style="display:none"></div>' +
             '<div id="zuul-rl-demo-bar-wrap"><div id="zuul-rl-demo-bar"></div></div>' +
             '<div id="zuul-rl-demo-warning"></div>' +
             '</div>' +
             '<div id="zuul-rl-status" class="zuul-rl-status-line">' +
-            'Waiting for live metrics\u2026 Click Run demo for a ~5-minute continuous traffic session (adaptive batches; half fail + half pass; check \u2192 Verified+1 \u2192 gate).</div>') +
+            'Waiting for live metrics\u2026 Adjust Changes/Fails then Run demo.</div>') +
 
-          // 2. Live Comparison — headline story, key numbers, saturation.
-          section(2, 'Live Comparison',
-            'The headline: how many changes each strategy runs in parallel right now.',
-            '<div id="zuul-rl-benefit-story"></div>' +
+          // 2. Session summary (headline stats once)
+          section(2, 'Session summary',
+            'Totals for this demo session — each metric appears only here.',
+            '<div id="zuul-rl-done-banner"></div>' +
             '<div id="zuul-rl-highlights" class="zuul-rl-highlight-grid">' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-rl" title="RL applied gate window (active)">' +
-            '<div class="zuul-rl-hl-label">RL window</div>' +
-            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-rl">8</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-tcp" title="TCP shadow window (shrinks on failure)">' +
-            '<div class="zuul-rl-hl-label">TCP window</div>' +
-            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-tcp">8</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-queue" title="Gate queue depth vs saturation target max(RL, TCP) + margin">' +
-            '<div class="zuul-rl-hl-label">Gate queue</div>' +
-            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-queue">0</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-fail" title="Gate failures this session">' +
-            '<div class="zuul-rl-hl-label">Failures</div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-submitted">' +
+            '<div class="zuul-rl-hl-label">Submitted</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-submitted">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-merged">' +
+            '<div class="zuul-rl-hl-label">Merged</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-merged">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-fail">' +
+            '<div class="zuul-rl-hl-label">Failed (gate)</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-failures">0</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-win" title="Live extra = max(0, min(queue,RL) − min(queue,TCP))">' +
-            '<div class="zuul-rl-hl-label">Extra in flight</div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-win zuul-rl-hl-extra">' +
+            '<div class="zuul-rl-hl-label">Extra vs TCP</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-extra">0</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-win" title="Discrete per-failure estimate, capped at session wall-clock">' +
-            '<div class="zuul-rl-hl-label">Min saved (est.)</div>' +
-            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-saved">0</div></div>' +
-            '</div>' +
-            '<div id="zuul-rl-queue-saturation">Queue saturation: waiting for data\u2026</div>' +
-            '<div id="zuul-rl-debug-line" class="zuul-rl-efficiency-formula" title="Live RL / TCP / queue / extra for debugging">' +
-            'RL — · TCP — · queue — · extra in flight —</div>') +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-adv">' +
+            '<div class="zuul-rl-hl-label">Advantage</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-adv">\u2014</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-peak">' +
+            '<div class="zuul-rl-hl-label">Peak RL / TCP floor</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-peak">\u2014</div></div>' +
+            '</div>') +
 
-          // 3. Why — last RL decision reason from the audit stream.
-          section(3, 'Why (RL decision)',
-            'Human-readable reason for the RL agent\u2019s last window decision.',
-            '<div id="zuul-rl-decision-reason">' +
+          // 3. Live + decision
+          section(3, 'Live &amp; decision',
+            'Current windows/queue, plus why the RL agent last changed the window.',
+            '<div id="zuul-rl-live-line">Live: waiting for window data\u2026</div>' +
+            '<div id="zuul-rl-decision-reason" style="margin-top:6px">' +
             '<span class="zuul-rl-reason-label">RL:</span> ' +
             'waiting for first agent tick\u2026</div>') +
 
-          // 4. Charts — windows over time, advantage, extras, throughput.
+          // 4. Charts (no duplicate big chips)
           section(4, 'Charts',
-            'Window sizes over time, per-failure extras and gate throughput.',
+            'Window sizes over time, advantage trend, per-failure extras, throughput.',
             '<div class="zuul-rl-chart-wrap">' +
-            '<div class="zuul-rl-chart-title" title="RL applied window vs TCP shadow over time. Red markers = gate failures.">' +
-            'RL vs TCP window over time</div>' +
+            '<div class="zuul-rl-chart-title" title="Full demo session timeline (session start → now). Red markers = gate failures.">' +
+            'RL vs TCP window (full session)</div>' +
             '<canvas id="zuul-rl-window-chart" class="zuul-rl-chart" width="440" height="140"></canvas>' +
             '<div class="zuul-rl-legend">' +
             '<span><span class="swatch" style="background:#06c"></span>RL (applied)</span>' +
             '<span><span class="swatch" style="background:#f0ab00"></span>TCP (shadow)</span>' +
-            '<span><span class="swatch" style="background:#c9190b;height:8px;width:2px"></span>gate failure + change id</span>' +
-            '<span><span class="swatch" style="background:#c46100"></span>\u25bc TCP drop</span>' +
-            '<span><span class="swatch" style="background:#06c;border-radius:50%;width:6px;height:6px"></span>RL held</span>' +
-            '</div>' +
-            '<div class="zuul-rl-chart-axis">Y = window size · X = time · divergence after failures shows RL advantage</div>' +
-            '</div>' +
-            '<div class="zuul-rl-efficiency-block" title="Session advantage: sum(extra at failures) / sum(TCP at failures) × 100">' +
-            '<div class="zuul-rl-chart-title">RL advantage vs TCP (%)</div>' +
+            '<span><span class="swatch" style="background:#c9190b;height:8px;width:2px"></span>gate failure</span>' +
+            '</div></div>' +
+            '<div class="zuul-rl-efficiency-block" title="Advantage % over time (session total is in Session summary).">' +
+            '<div class="zuul-rl-chart-title">Advantage % over time</div>' +
             '<div class="zuul-rl-efficiency-formula">' +
-            'sum(extra change-slots at failures) / sum(TCP window at failures) \u00d7 100</div>' +
-            '<div id="zuul-rl-efficiency-value" class="zuul-rl-efficiency-value">0%</div>' +
-            '<div id="zuul-rl-efficiency-detail" class="zuul-rl-efficiency-formula"></div>' +
+            'Trend chart only — session advantage is in Session summary above</div>' +
             '<canvas id="zuul-rl-efficiency-chart" width="440" height="56"></canvas>' +
             '</div>' +
             '<div class="zuul-rl-chart-wrap">' +
             '<div class="zuul-rl-chart-title" title="Extra parallel slots RL kept vs TCP at each gate failure.">' +
-            'Extra changes accommodated per failure</div>' +
+            'Extras per failure</div>' +
             '<canvas id="zuul-rl-extra-chart" width="440" height="90"></canvas>' +
-            '<div class="zuul-rl-legend">' +
-            '<span><span class="swatch" style="background:#06c;height:8px"></span>extra = RL − TCP at failure</span>' +
-            '</div></div>' +
+            '</div>' +
             '<div class="zuul-rl-chart-wrap">' +
-            '<div class="zuul-rl-chart-title" title="Completed gate builds per minute during the session.">' +
-            'Gate throughput (builds / min)</div>' +
+            '<div class="zuul-rl-chart-title" title="Completed gate builds per minute across the full session.">' +
+            'Gate throughput (builds / min, full session)</div>' +
             '<canvas id="zuul-rl-throughput-chart" class="zuul-rl-chart" width="440" height="110"></canvas>' +
-            '<div class="zuul-rl-legend">' +
-            '<span><span class="swatch" style="background:#3e8635"></span>completed gate builds</span>' +
-            '</div></div>') +
-
-          // 5. Failures — counter plus per-failure impact list.
-          section(5, 'Failures',
-            'Every gate failure: which change failed, how TCP shrank, how RL held.',
-            '<div id="zuul-rl-failure-counter" class="zuul-rl-failure-counter" title="Gate job failures (half of each batch fails deterministically)">' +
-            'Gate failures: 0 (half of each batch fails deterministically)</div>' +
-            '<div id="zuul-rl-failures" class="zuul-rl-failures"></div>') +
-
-          // 6. Session Summary / Savings — totals + end-of-run card.
-          section(6, 'Session Summary / Savings',
-            'Session totals: minutes saved, merges, comparison after the run.',
-            '<div id="zuul-rl-final-summary"></div>' +
-            '<div id="zuul-rl-effectiveness" class="zuul-rl-effectiveness-block"></div>' +
+            '</div>' +
             '<div id="zuul-rl-comparison" class="zuul-rl-compare-block" style="display:none"></div>') +
+
+          // 5. Recent failures (list only — count is in Session summary)
+          section(5, 'Recent failures',
+            'Per-failure impact: which change failed, how TCP shrunk, how RL held.',
+            '<div id="zuul-rl-failures" class="zuul-rl-failures"></div>') +
 
           '</div>';
         var runBtn = panel.querySelector('#zuul-rl-run-btn');
@@ -1929,6 +1917,15 @@
         if (minBtn) {
           minBtn.addEventListener('click', togglePanelMinimized);
         }
+        ['#zuul-rl-total-changes', '#zuul-rl-gate-failures'].forEach(
+          function (sel) {
+            var inp = panel.querySelector(sel);
+            if (inp) {
+              inp.addEventListener('input', function () {
+                inp.setAttribute('data-user-edited', '1');
+              });
+            }
+          });
         try {
           if (sessionStorage.getItem('zuul-rl-panel-minimized') === '1') {
             setPanelMinimized(panel, true);
@@ -1987,6 +1984,43 @@
       function triggerDemo() {
         var panel = ensureReportPanel();
         var btn = panel.querySelector('#zuul-rl-run-btn');
+        var totalInput = panel.querySelector('#zuul-rl-total-changes');
+        var failsInput = panel.querySelector('#zuul-rl-gate-failures');
+        var body = {};
+        var totalVal = totalInput && totalInput.value !== '' ?
+          Number(totalInput.value) : null;
+        var failsVal = failsInput && failsInput.value !== '' ?
+          Number(failsInput.value) : null;
+        if (totalVal != null && (!isFinite(totalVal) || totalVal < 0)) {
+          var statusBad = panel.querySelector('#zuul-rl-status');
+          if (statusBad) {
+            statusBad.textContent = 'Changes must be a number \u2265 0.';
+            statusBad.className = 'zuul-rl-status-line zuul-rl-status-error';
+          }
+          return;
+        }
+        if (failsVal != null && (!isFinite(failsVal) || failsVal < 0)) {
+          var statusBad2 = panel.querySelector('#zuul-rl-status');
+          if (statusBad2) {
+            statusBad2.textContent = 'Fails must be a number \u2265 0 (gate job failures).';
+            statusBad2.className = 'zuul-rl-status-line zuul-rl-status-error';
+          }
+          return;
+        }
+        if (totalVal != null && failsVal != null && failsVal > totalVal) {
+          var statusBad3 = panel.querySelector('#zuul-rl-status');
+          if (statusBad3) {
+            statusBad3.textContent = 'Fails must be \u2264 Changes.';
+            statusBad3.className = 'zuul-rl-status-line zuul-rl-status-error';
+          }
+          return;
+        }
+        if (totalVal != null) {
+          body.total_changes = Math.floor(totalVal);
+        }
+        if (failsVal != null) {
+          body.gate_failures = Math.floor(failsVal);
+        }
         if (btn) {
           btn.disabled = true;
           btn.textContent = 'Starting...';
@@ -2001,24 +2035,47 @@
         fetch(CONTROL_BASE + '/run-demo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: '{}'
+          body: JSON.stringify(body)
         })
           .then(function (resp) {
             if (!resp.ok) {
-              throw new Error('run-demo failed');
+              return resp.json().then(function (err) {
+                throw new Error((err && err.message) || 'run-demo failed');
+              }).catch(function (e) {
+                if (e && e.message && e.message !== 'run-demo failed') {
+                  throw e;
+                }
+                throw new Error('run-demo failed');
+              });
             }
             return resp.json();
           })
           .then(function (data) {
+            if (data.expected_failures != null &&
+                !isNaN(Number(data.expected_failures))) {
+              DEMO_EXPECTED_FAILURES = Math.max(
+                0, Math.round(Number(data.expected_failures)));
+            }
+            if (data.total_changes != null &&
+                !isNaN(Number(data.total_changes))) {
+              DEMO_CHANGE_COUNT = Math.max(
+                0, Math.round(Number(data.total_changes)));
+            }
+            var failCard = panel.querySelector('#zuul-rl-hl-failures');
+            if (failCard) {
+              failCard.textContent = '0/' + DEMO_EXPECTED_FAILURES;
+            }
             renderDemoProgress({
               phase: data.phase || 'starting',
               message: data.message || 'Demo started',
               percent: 2,
-              extend_available: true
+              extend_available: true,
+              expected_failures: DEMO_EXPECTED_FAILURES,
+              total_changes: data.total_changes
             });
             refreshAllParallel();
           })
-          .catch(function () {
+          .catch(function (err) {
             stopDemoPolling();
             if (btn) {
               btn.disabled = false;
@@ -2026,7 +2083,9 @@
             }
             var status = panel.querySelector('#zuul-rl-status');
             if (status) {
-              status.textContent = 'Failed to start demo \u2014 is rl-control running?';
+              status.textContent = (err && err.message) ?
+                err.message :
+                'Failed to start demo \u2014 is rl-control running?';
               status.className = 'zuul-rl-status-line zuul-rl-status-error';
             }
           });
@@ -2037,6 +2096,9 @@
           return;
         }
         var ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return;
+        }
         var w = canvas.width;
         var h = canvas.height;
         var pad = { top: 12, right: 10, bottom: 22, left: 32 };
@@ -2052,7 +2114,9 @@
             }
           });
         });
-        if (!allY.length) {
+        var primaryVals = (series[0] && series[0].values) || [];
+        var n = primaryVals.length;
+        if (!allY.length || n === 0) {
           ctx.fillStyle = '#6a6e73';
           ctx.font = '11px sans-serif';
           ctx.fillText('Waiting for agent ticks\u2026', pad.left, h / 2);
@@ -2076,7 +2140,6 @@
         }
         var plotW = w - pad.left - pad.right;
         var plotH = h - pad.top - pad.bottom;
-        var n = series[0].values.length;
         var xAt = function (i) {
           return pad.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
         };
@@ -2223,6 +2286,9 @@
           return;
         }
         var ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return;
+        }
         var w = canvas.width;
         var h = canvas.height;
         ctx.clearRect(0, 0, w, h);
@@ -2236,8 +2302,10 @@
           return;
         }
         var vals = failures.map(function (f) {
-          return f.extra_changes != null ? f.extra_changes :
+          var v = f.extra_changes != null ? f.extra_changes :
             (f.changes_in_window_delta != null ? f.changes_in_window_delta : 0);
+          v = Number(v);
+          return isNaN(v) ? 0 : v;
         });
         var maxY = Math.max(1, Math.max.apply(null, vals));
         var plotW = w - pad.left - pad.right;
@@ -2269,7 +2337,7 @@
         });
       }
 
-      function renderFailures(container, failures, failureCounts) {
+      function renderFailures(container, failures, failureCounts, metrics) {
         if (!container) {
           return;
         }
@@ -2277,10 +2345,7 @@
           container.innerHTML = '';
           return;
         }
-        var total = failureCounts && failureCounts.gate_jobs_total != null ?
-          failureCounts.gate_jobs_total : failures.length;
-        var html = '<strong>' + total + ' gate failure' +
-          (total === 1 ? '' : 's') + ' this session</strong>';
+        var html = '<strong>Recent failures</strong>';
         failures.slice().reverse().forEach(function (f) {
           var tip = '';
           if (f.extra_changes != null) {
@@ -2388,34 +2453,18 @@
                 if (st.demo_progress) {
                   renderDemoProgress(st.demo_progress);
                 }
-                if (st.effectiveness) {
-                  var effectivenessEl = panel.querySelector(
-                    '#zuul-rl-effectiveness');
-                  renderEffectivenessMetrics(effectivenessEl, st.effectiveness);
-                }
                 if (!lastMetrics || !demoRunning) {
                   status.textContent =
-                    'Demo scenario running \u2014 see progress above; graphs update live.';
+                    'Demo scenario running \u2014 see progress above.';
                   status.className += ' zuul-rl-status-running';
                 }
               } else if (st.last_error) {
                 status.textContent = 'Last demo run failed: ' + st.last_error;
                 status.className += ' zuul-rl-status-error';
               } else if (st.latest && st.latest.rl_window != null) {
-                var latest = st.latest;
-                var failNote = failureStatusNote(st.failure_counts);
-                var windowNote = windowChangesNote(latest);
-                var savedNote = effectivenessStatusNote(st);
                 status.textContent =
-                  'Live — RL active window ' + latest.rl_window +
-                  ' (applied), TCP baseline ' + latest.tcp_window +
-                  ' (shadow), throughput ' + latest.throughput_per_min + '/min' +
-                  windowNote + savedNote + failNote;
+                  'Live — session & live metrics below.';
                 status.className += ' zuul-rl-status-live';
-                var failCounterEl = panel.querySelector('#zuul-rl-failure-counter');
-                renderFailureCounter(failCounterEl, st.failure_counts);
-                var effectivenessEl = panel.querySelector('#zuul-rl-effectiveness');
-                renderEffectivenessMetrics(effectivenessEl, st.effectiveness);
               } else if (st.latest_run) {
                 status.textContent =
                   'Idle \u2014 latest report ' + st.latest_run +
@@ -2605,3 +2654,4 @@
       }
     })();
     </script>
+    <!-- zuul-rl-overlay-end -->

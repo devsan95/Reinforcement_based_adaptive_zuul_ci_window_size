@@ -59,6 +59,8 @@ services:
       - certs:/var/certs:z
       - lib-zuul-web:/var/lib/zuul
       - rl-report:/usr/local/lib/python3.11/site-packages/zuul/web/static/rl-report
+      # Live-update overlay without rebuilding the web image (inject re-applies on start).
+      - ./web-overlay/rl-inject.html:/overlay/rl-inject.html:ro
     command: |
       sh -c 'python3 /inject-rl-ui.py && \
              /var/playbooks/wait-to-start-certs.sh && \

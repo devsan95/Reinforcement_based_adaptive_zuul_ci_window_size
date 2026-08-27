@@ -658,7 +658,8 @@ class WindowController:
                 actual_window=actual_window,
                 tcp_shadow_window=tcp_shadow,
                 decision_reason=decision_reason,
-                decision_source=decision_meta.get("source"))
+                decision_source=decision_meta.get("source"),
+                decision_detail=decision_meta.get("policy_detail"))
             self._audit(key, {
                 "event": "agent_tick",
                 "state": state,
@@ -671,6 +672,7 @@ class WindowController:
                 "rl_vs_tcp_delta": recommended - tcp_shadow,
                 "decision_reason": decision_reason,
                 "decision_source": decision_meta.get("source"),
+                "decision_detail": decision_meta.get("policy_detail"),
                 "decision_confidence": decision_meta.get("confidence"),
                 "knn_distance": decision_meta.get("knn_distance"),
                 "guardrail": decision_meta.get("guardrail"),
@@ -748,28 +750,74 @@ class WindowController:
             "window_after": change_queue.window,
         })
 
+    @staticmethod
+    def _format_decision_reason(
+            action_idx: int,
+            state: List[float],
+            *,
+            kind: str = "policy") -> str:
+        """Plain-English primary UI reason for a window action.
+
+        Keep this short and non-technical. Lookup detail (kNN distance,
+        etc.) stays in meta["policy_detail"] for tooltips/debug only.
+        """
+        delta = ACTION_DELTAS[action_idx]
+        failure_rate = state[2] if len(state) > 2 else 0.0
+        queue_saturation = state[1] if len(state) > 1 else 0.0
+        success_streak = state[3] if len(state) > 3 else 0.0
+        fr_pct = int(round(failure_rate * 100))
+        streak_n = int(success_streak * SUCCESS_STREAK_NORM)
+        quiet = failure_rate < 0.1 and queue_saturation < 0.4
+        step = abs(delta)
+
+        if kind == "hold_burst":
+            return (
+                f"Held the window — holding through failures "
+                f"({fr_pct}% rate). TCP would have cut capacity; "
+                f"RL keeps it steady.")
+        if kind == "ramp_streak":
+            return (
+                f"Increased the window by {step} after {streak_n} "
+                f"consecutive successes (faster than TCP's +1).")
+        if delta < 0:
+            if quiet:
+                return (
+                    f"Reduced the window by {step} (gentle trim). "
+                    f"Failures are low; TCP would have halved instead.")
+            return (
+                f"Reduced the window by {step} (gentle trim). "
+                f"Failure rate {fr_pct}%; TCP would have halved instead.")
+        if delta > 0:
+            if quiet or failure_rate < 0.1:
+                return (
+                    f"Increased the window by {step}. "
+                    f"Queue is quiet and failures are low.")
+            return (
+                f"Increased the window by {step}. "
+                f"Failure rate {fr_pct}% is still workable.")
+        if quiet:
+            return (
+                f"Held the window — queue quiet, failures low "
+                f"({fr_pct}%), steady state.")
+        return (
+            f"Held the window — failure rate {fr_pct}%, "
+            f"queue {queue_saturation:.0%} saturated.")
+
     def _heuristic_action(self, state: List[float]) -> Tuple[int, str]:
         """Rule-based fallback when no policy applies (low kNN confidence,
         no table loaded, or PPO unavailable)."""
         failure_rate = state[2] if len(state) > 2 else 0.0
         queue_saturation = state[1] if len(state) > 1 else 0.0
         success_streak = state[3] if len(state) > 3 else 0.0
-        fr_pct = int(round(failure_rate * 100))
-        hold_pct = int(round(DEMO_HOLD_FAILURE_RATE * 100))
         if failure_rate > DEMO_HOLD_FAILURE_RATE:
-            return 2, (
-                f"held despite failures — recent failure rate {fr_pct}% "
-                f"> {hold_pct}% hold threshold; one burst shouldn't halve "
-                f"throughput (TCP shrinks exponentially instead)")
+            return 2, self._format_decision_reason(
+                2, state, kind="hold_burst")
         if success_streak >= 0.3:
-            return 4, (
-                f"grew +2 — {int(success_streak * SUCCESS_STREAK_NORM)} "
-                f"consecutive successes, failure rate {fr_pct}%; ramping "
-                f"back faster than TCP's +1")
+            return 4, self._format_decision_reason(
+                4, state, kind="ramp_streak")
         if failure_rate < 0.1 and queue_saturation < 0.4:
-            return 3, (
-                f"grew +1 — failure rate {fr_pct}% healthy, queue light")
-        return 2, f"held — failure rate {fr_pct}%, steady state"
+            return 3, self._format_decision_reason(3, state)
+        return 2, self._format_decision_reason(2, state)
 
     def _choose_action(self, state: List[float]) -> Tuple[int, str, dict]:
         """Pick a window action, explain it, and report the source.
@@ -790,42 +838,24 @@ class WindowController:
                clamped to the pipeline floor/ceiling.
 
         Returns (action_idx, human-readable reason, meta) where meta has
-        "source" (table-exact | knn | ppo | heuristic) and "confidence"
-        (0..1, from kNN distance when applicable).
+        "source" (table-exact | knn | ppo | heuristic), "confidence"
+        (0..1, from kNN distance when applicable), and optional
+        "policy_detail" for tooltips/debug (kNN distance, table match, …).
         """
         failure_rate = state[2] if len(state) > 2 else 0.0
-        queue_saturation = state[1] if len(state) > 1 else 0.0
         success_streak = state[3] if len(state) > 3 else 0.0
-        fr_pct = int(round(failure_rate * 100))
-        hold_pct = int(round(DEMO_HOLD_FAILURE_RATE * 100))
 
-        def _guarded(action: int, policy_name: str,
-                     meta: dict) -> Tuple[int, str, dict]:
+        def _guarded(action: int, meta: dict) -> Tuple[int, str, dict]:
             delta = ACTION_DELTAS[action]
             if failure_rate > DEMO_HOLD_FAILURE_RATE and delta < 0:
                 meta = dict(meta, guardrail="hold_on_failure_burst")
-                return 2, (
-                    f"held despite failures — recent failure rate {fr_pct}% "
-                    f"> {hold_pct}% hold threshold; one burst shouldn't "
-                    f"halve throughput (TCP shrinks exponentially instead)"
-                ), meta
+                return 2, self._format_decision_reason(
+                    2, state, kind="hold_burst"), meta
             if delta == 0 and failure_rate < 0.05 and success_streak >= 0.5:
                 meta = dict(meta, guardrail="ramp_on_success_streak")
-                return 4, (
-                    f"grew +2 — {int(success_streak * SUCCESS_STREAK_NORM)} "
-                    f"consecutive successes and failure rate {fr_pct}%; "
-                    f"ramping faster than TCP's +1"), meta
-            if delta > 0:
-                return action, (
-                    f"{policy_name} grows window +{delta} — failure rate "
-                    f"{fr_pct}% is healthy"), meta
-            if delta < 0:
-                return action, (
-                    f"{policy_name} trims window {delta} (bounded, never "
-                    f"exponential) — failure rate {fr_pct}%"), meta
-            return action, (
-                f"{policy_name} holds window — failure rate {fr_pct}%, "
-                f"queue {queue_saturation:.0%} saturated"), meta
+                return 4, self._format_decision_reason(
+                    4, state, kind="ramp_streak"), meta
+            return action, self._format_decision_reason(action, state), meta
 
         if self._policy_table is not None or self._policy_entries:
             action, distance, detail = self._lookup_table_action(state)
@@ -833,27 +863,38 @@ class WindowController:
                 confidence = _clip01(1.0 - distance / max(
                     KNN_MAX_DISTANCE, 1e-6))
                 source = ("table-exact" if distance == 0.0 else "knn")
-                return _guarded(action, f"policy {detail}", {
+                return _guarded(action, {
                     "source": source,
                     "confidence": round(confidence, 3),
                     "knn_distance": round(distance, 4),
+                    "policy_detail": detail,
                 })
-            # Low confidence: fall through to heuristic with the reason.
+            # Low confidence: fall through to heuristic; keep lookup detail
+            # in meta for debug, not in the primary reason string.
             h_action, h_reason = self._heuristic_action(state)
-            return h_action, f"heuristic ({detail}) — {h_reason}", {
+            return h_action, h_reason, {
                 "source": "heuristic",
                 "confidence": 0.0,
                 "knn_distance": (round(distance, 4)
                                  if math.isfinite(distance) else None),
+                "policy_detail": detail,
             }
         if self._policy is not None and np is not None:
             obs = np.array(state, dtype=np.float32)
             action, _ = self._policy.predict(obs, deterministic=True)
-            return _guarded(int(action), "PPO policy", {
-                "source": "ppo", "confidence": None, "knn_distance": None})
+            return _guarded(int(action), {
+                "source": "ppo",
+                "confidence": None,
+                "knn_distance": None,
+                "policy_detail": "PPO policy",
+            })
         h_action, h_reason = self._heuristic_action(state)
         return h_action, h_reason, {
-            "source": "heuristic", "confidence": None, "knn_distance": None}
+            "source": "heuristic",
+            "confidence": None,
+            "knn_distance": None,
+            "policy_detail": None,
+        }
 
     def _recommend_window(self, change_queue, action_idx: int) -> int:
         delta = ACTION_DELTAS[action_idx]
@@ -910,7 +951,8 @@ class WindowController:
                                actual_window: Optional[int] = None,
                                tcp_shadow_window: Optional[int] = None,
                                decision_reason: Optional[str] = None,
-                               decision_source: Optional[str] = None):
+                               decision_source: Optional[str] = None,
+                               decision_detail: Optional[str] = None):
         key = self._queue_key(change_queue)
         if actual_window is None:
             actual_window = int(
@@ -927,6 +969,7 @@ class WindowController:
                 "action_delta": ACTION_DELTAS[action_idx],
                 "decision_reason": decision_reason or "",
                 "decision_source": decision_source or "",
+                "decision_detail": decision_detail or "",
                 "mode": self._mode,
                 "updated_at": time.time(),
             }
@@ -957,6 +1000,7 @@ class WindowController:
             "rl_action_delta": rec["action_delta"],
             "rl_decision_reason": rec.get("decision_reason", ""),
             "rl_decision_source": rec.get("decision_source", ""),
+            "rl_decision_detail": rec.get("decision_detail", ""),
             "rl_mode": rec["mode"],
             "rl_updated_at": int(rec["updated_at"] * 1000),
         }
@@ -982,6 +1026,7 @@ class WindowController:
                     "action_delta": q["action_delta"],
                     "decision_reason": q.get("decision_reason", ""),
                     "decision_source": q.get("decision_source", ""),
+                    "decision_detail": q.get("decision_detail", ""),
                     "updated_at": int(q["updated_at"] * 1000),
                 }
                 for q in queues

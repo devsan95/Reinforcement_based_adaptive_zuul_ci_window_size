@@ -385,7 +385,10 @@ def submit_batch(
             if phase.startswith("gate"):
                 gated += 1
             batch_index = index - start_index
-            if batch_should_fail(batch_index, fail_per_batch):
+            # Only count stamps that actually entered gate — check timeouts
+            # or upload-only changes must not consume the fail budget.
+            if phase.startswith("gate") and batch_should_fail(
+                    batch_index, fail_per_batch):
                 fail_stamped += 1
             if change_id:
                 change_ids.append(change_id)
@@ -410,7 +413,7 @@ def submit_batch(
         "gated": gated,
         "skipped": skipped,
         "fail_stamped": fail_stamped,
-        "pass_stamped": submitted - fail_stamped,
+        "pass_stamped": max(0, gated - fail_stamped),
         "change_ids": change_ids,
         "change_nums": change_nums,
         "start_index": start_index,

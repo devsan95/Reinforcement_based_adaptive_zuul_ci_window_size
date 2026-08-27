@@ -25,10 +25,8 @@
     vars:
       research_fail_mode: demo_batch
       research_fail_per_batch: "5"
-      # ~6s gate jobs: with 10 changes arriving every 20s the gate queue
-      # stays deeper than the demo window (8), so in-flight RL vs TCP
-      # counts stay differentiated through the middle of the run.
-      research_gate_sleep_sec: "6"
+      # ~1s gate jobs: savings display as job-runs (extras ≈ job-runs saved).
+      research_gate_sleep_sec: "1"
 
 # Fast check (~1s shell work); almost always succeeds so Verified +1 lands.
 - job:

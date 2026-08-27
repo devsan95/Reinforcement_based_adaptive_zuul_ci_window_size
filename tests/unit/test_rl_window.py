@@ -365,7 +365,8 @@ class RLStatePolicyTests(unittest.TestCase):
         self.assertGreater(dist, KNN_MAX_DISTANCE)
         chosen, reason, meta = self.controller._choose_action(live)
         self.assertEqual(meta["source"], "heuristic")
-        self.assertIn("heuristic", reason)
+        self.assertNotIn("heuristic (", reason)
+        self.assertIn("out of table distribution", meta.get("policy_detail", ""))
         self.assertIn(ACTION_DELTAS[chosen], ACTION_DELTAS)
 
     def test_guardrail_holds_shrink_during_failure_burst(self):
@@ -378,7 +379,9 @@ class RLStatePolicyTests(unittest.TestCase):
         live = [0.4, 0.25, 0.5, 0.0, 0.0, 0.5]
         action, reason, meta = self.controller._choose_action(live)
         self.assertEqual(ACTION_DELTAS[action], 0)
-        self.assertIn("held despite failures", reason)
+        self.assertIn("Held the window", reason)
+        self.assertIn("holding through failures", reason)
+        self.assertNotIn("kNN", reason)
         self.assertEqual(meta.get("guardrail"), "hold_on_failure_burst")
 
     def test_guardrail_ramps_hold_on_success_streak(self):
@@ -391,6 +394,7 @@ class RLStatePolicyTests(unittest.TestCase):
         live = [0.4, 0.25, 0.0, 0.8, 0.0, 0.5]
         action, reason, meta = self.controller._choose_action(live)
         self.assertEqual(ACTION_DELTAS[action], 2)
+        self.assertIn("Increased the window by 2", reason)
         self.assertIn("consecutive successes", reason)
         self.assertEqual(meta.get("guardrail"), "ramp_on_success_streak")
 
@@ -399,13 +403,51 @@ class RLStatePolicyTests(unittest.TestCase):
         burst = [0.4, 0.25, 0.5, 0.0, 0.0, 0.5]
         action, reason, meta = self.controller._choose_action(burst)
         self.assertEqual(ACTION_DELTAS[action], 0)
-        self.assertIn("held despite failures", reason)
+        self.assertIn("Held the window", reason)
+        self.assertIn("holding through failures", reason)
         self.assertEqual(meta["source"], "heuristic")
         healthy = [0.4, 0.25, 0.0, 0.5, 0.0, 0.5]
         action, reason, _ = self.controller._choose_action(healthy)
         self.assertEqual(ACTION_DELTAS[action], 2)
+        self.assertIn("Increased the window by 2", reason)
         self.assertIn("consecutive successes", reason)
 
+    def test_policy_reason_strings_are_plain_english(self):
+        self.controller._policy_kind = "ppo_table"
+        self.controller._policy_table = {}
+        # Quiet state → table votes trim −2.
+        self.controller._policy_entries = [
+            {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 0},
+        ]
+        live = [0.4, 0.25, 0.0, 0.0, 0.0, 0.5]
+        action, reason, meta = self.controller._choose_action(live)
+        self.assertEqual(ACTION_DELTAS[action], -2)
+        self.assertIn("Reduced the window by 2", reason)
+        self.assertIn("gentle trim", reason)
+        self.assertIn("TCP would have halved", reason)
+        self.assertNotIn("by -2", reason)
+        self.assertNotIn("kNN", reason)
+        self.assertNotIn("nearest", reason)
+        self.assertEqual(meta["source"], "knn")
+        self.assertIn("kNN", meta.get("policy_detail", ""))
+
+        # Healthy grow +1
+        self.controller._policy_entries = [
+            {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 3},
+        ]
+        action, reason, meta = self.controller._choose_action(live)
+        self.assertEqual(ACTION_DELTAS[action], 1)
+        self.assertIn("Increased the window by 1", reason)
+        self.assertNotIn("kNN", reason)
+
+        # Hold
+        self.controller._policy_entries = [
+            {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 2},
+        ]
+        action, reason, meta = self.controller._choose_action(live)
+        self.assertEqual(ACTION_DELTAS[action], 0)
+        self.assertIn("Held the window", reason)
+        self.assertNotIn("kNN", reason)
 
 if __name__ == "__main__":
     unittest.main()

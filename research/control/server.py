@@ -35,7 +35,9 @@ PUBLISH_DIR = Path(os.environ.get("RL_CONTROL_PUBLISH_DIR", "/published"))
 AUDIT_PATH = Path(os.environ.get("RL_CONTROL_AUDIT_PATH", "/var/lib/zuul/rl_window_audit.jsonl"))
 ZUUL_API = os.environ.get("RL_CONTROL_ZUUL_API", "http://web:9000")
 TRAFFIC_DIR = Path("/app")
-LIVE_METRICS_MAX_POINTS = int(os.environ.get("RL_LIVE_METRICS_MAX_POINTS", "120"))
+# Cap chart samples; downsample uniformly across the full session (never a
+# trailing sliding window that drops early demo points).
+LIVE_METRICS_MAX_POINTS = int(os.environ.get("RL_LIVE_METRICS_MAX_POINTS", "2400"))
 LIVE_METRICS_LOOKBACK_SEC = float(
     os.environ.get("RL_LIVE_METRICS_LOOKBACK_SEC", "3600"))
 LIVE_METRICS_CACHE_SEC = float(
@@ -89,6 +91,9 @@ DEMO_EXPECTED_FAILURES = int(os.environ.get(
     "DEMO_EXPECTED_FAILURES",
     str(max(1, int(DEMO_DURATION_SEC / DEMO_BATCH_INTERVAL_SEC)
             * DEMO_FAIL_PER_BATCH))))
+# Caps for optional /run-demo body params (total_changes / gate_failures).
+DEMO_MAX_TOTAL_CHANGES = int(os.environ.get("DEMO_MAX_TOTAL_CHANGES", "500"))
+DEMO_MAX_GATE_FAILURES = int(os.environ.get("DEMO_MAX_GATE_FAILURES", "500"))
 DEMO_GATE_BUILD_POLL_SEC = float(
     os.environ.get("DEMO_GATE_BUILD_POLL_SEC", "5"))
 
@@ -146,6 +151,184 @@ def _planned_batches(duration_sec: float = DEMO_DURATION_SEC) -> int:
     ))
 
 
+def _batches_plan_tip(
+        planned: int,
+        *,
+        target_total: Optional[int] = None,
+        duration_sec: float = DEMO_DURATION_SEC) -> str:
+    """One-line why batches_planned equals Y (for the demo progress tip)."""
+    planned = max(1, int(planned))
+    interval = max(1, int(DEMO_BATCH_INTERVAL_SEC))
+    if target_total is not None and int(target_total) > 0:
+        return (
+            f"Y = {planned}: {int(target_total)} changes "
+            f"÷ {DEMO_BATCH_SIZE} per batch"
+        )
+    dur_min = max(1, int(round(float(duration_sec) / 60.0)))
+    return (
+        f"Y = {planned}: ~{dur_min} min session ÷ {interval}s interval"
+    )
+
+def _parse_optional_nonneg_int(
+        value, *, field: str, max_value: int) -> Tuple[Optional[int], Optional[str]]:
+    """Parse an optional non-negative int; empty/None → (None, None)."""
+    if value is None or value == "":
+        return None, None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None, f"{field} must be an integer"
+    if n < 0:
+        return None, f"{field} must be >= 0"
+    if n > max_value:
+        return None, f"{field} must be <= {max_value}"
+    return n, None
+
+
+def parse_run_demo_params(
+        body: Optional[dict] = None) -> Tuple[Optional[dict], Optional[str]]:
+    """Validate optional /run-demo body params.
+
+    Accepted keys:
+      total_changes — stop after this many submitted changes
+      gate_failures / fail_count — stamp this many fails across the session
+
+    Empty body keeps duration-based defaults. Returns (params, error).
+    """
+    body = body or {}
+    total, err = _parse_optional_nonneg_int(
+        body.get("total_changes"),
+        field="total_changes",
+        max_value=DEMO_MAX_TOTAL_CHANGES)
+    if err:
+        return None, err
+    fails, err = _parse_optional_nonneg_int(
+        body.get("gate_failures"),
+        field="gate_failures",
+        max_value=DEMO_MAX_GATE_FAILURES)
+    if err:
+        return None, err
+    if fails is None and "fail_count" in body:
+        fails, err = _parse_optional_nonneg_int(
+            body.get("fail_count"),
+            field="fail_count",
+            max_value=DEMO_MAX_GATE_FAILURES)
+        if err:
+            return None, err
+    if total is not None and fails is not None and fails > total:
+        return None, "gate_failures must be <= total_changes"
+
+    if fails is not None:
+        expected = fails
+    elif total is not None:
+        ratio = DEMO_FAIL_PER_BATCH / max(DEMO_BATCH_SIZE, 1)
+        expected = max(0, int(round(total * ratio)))
+    else:
+        expected = DEMO_EXPECTED_FAILURES
+
+    return {
+        "total_changes": total,
+        "gate_failures": fails,
+        "expected_failures": int(expected),
+    }, None
+
+
+def fails_for_batch(
+        batch_size: int,
+        remaining_changes: int,
+        remaining_fails: int) -> int:
+    """Distribute remaining fail stamps across remaining changes.
+
+    Ensures the fail target remains reachable after this batch and never
+    exceeds batch_size or remaining_fails.
+    """
+    batch_size = max(0, int(batch_size))
+    remaining_changes = max(0, int(remaining_changes))
+    remaining_fails = max(0, int(remaining_fails))
+    if batch_size <= 0 or remaining_changes <= 0 or remaining_fails <= 0:
+        return 0
+    size = min(batch_size, remaining_changes)
+    after = remaining_changes - size
+    hi = min(size, remaining_fails)
+    # Must stamp at least this many now so the target stays reachable;
+    # clamp to hi when remaining_fails somehow exceeds remaining_changes.
+    lo = min(hi, max(0, remaining_fails - after))
+    prop = int(round(remaining_fails * size / float(remaining_changes)))
+    return max(lo, min(hi, prop))
+
+
+def fails_for_duration_batch(
+        batch_size: int,
+        remaining_fails: int,
+        batches_left: int) -> int:
+    """Spread remaining fail stamps across estimated remaining duration batches.
+
+    Last estimated batch takes the remainder so the absolute fail target is
+    reachable before the continuous window ends.
+    """
+    batch_size = max(0, int(batch_size))
+    remaining_fails = max(0, int(remaining_fails))
+    batches_left = max(1, int(batches_left))
+    if batch_size <= 0 or remaining_fails <= 0:
+        return 0
+    if batches_left <= 1:
+        return min(batch_size, remaining_fails)
+    # Keep the target reachable: leave at most batch_size per future batch.
+    lo = min(batch_size, max(0, remaining_fails - (batches_left - 1) * batch_size))
+    prop = int(math.ceil(remaining_fails / float(batches_left)))
+    return max(lo, min(batch_size, remaining_fails, prop))
+
+
+def downsample_keep_span(items: Sequence, max_points: int) -> List:
+    """Uniformly sample across the full series, always keeping first + last."""
+    if max_points <= 0 or len(items) <= max_points:
+        return list(items)
+    n = len(items)
+    if max_points == 1:
+        return [items[-1]]
+    out: List = []
+    last_idx = -1
+    for i in range(max_points):
+        idx = int(round(i * (n - 1) / float(max_points - 1)))
+        if idx == last_idx:
+            continue
+        out.append(items[idx])
+        last_idx = idx
+    if out and out[-1] is not items[-1]:
+        out[-1] = items[-1]
+    if out and out[0] is not items[0]:
+        out[0] = items[0]
+    return out
+
+
+def default_demo_targets() -> dict:
+    """Visible UI / empty-/run-demo defaults for Changes and Fails."""
+    return {
+        "total_changes": DEMO_CHANGE_COUNT,
+        "gate_failures": DEMO_EXPECTED_FAILURES,
+        "expected_failures": DEMO_EXPECTED_FAILURES,
+        "duration_sec": DEMO_DURATION_SEC,
+        "batch_size": DEMO_BATCH_SIZE,
+        "fail_per_batch": DEMO_FAIL_PER_BATCH,
+    }
+
+
+def job_runs_saved_est(extra_changes_total: int) -> int:
+    """Session extras ≈ estimated job-runs saved (demo gate jobs ~1s)."""
+    return max(0, int(extra_changes_total or 0))
+
+
+def _session_expected_failures() -> int:
+    with LOCK:
+        value = STATE.get("demo_expected_failures")
+    if value is None:
+        return DEMO_EXPECTED_FAILURES
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return DEMO_EXPECTED_FAILURES
+
+
 def _demo_progress_idle() -> dict:
     planned = _planned_batches()
     return {
@@ -164,6 +347,8 @@ def _demo_progress_idle() -> dict:
         "batches_completed": 0,
         "batches_planned": planned,
         "batches_remaining": planned,
+        "batch_current": 0,
+        "batches_plan_tip": _batches_plan_tip(planned),
         "extend_available": False,
         "traffic_active": False,
         "time_remaining_s": DEMO_DURATION_SEC,
@@ -176,8 +361,10 @@ def _demo_progress_idle() -> dict:
         "rl_window": None,
         "tcp_window": None,
         "extra_in_flight": 0,
+        "total_changes": None,
+        "gate_failures_target": None,
+        "expected_failures": DEMO_EXPECTED_FAILURES,
     }
-
 
 STATE: Dict[str, object] = {
     "running": False,
@@ -192,6 +379,11 @@ STATE: Dict[str, object] = {
     "extend_batches": 0,
     "traffic_deadline": None,
     "batches_completed": 0,
+    # Optional /run-demo targets (None = duration / default-ratio mode).
+    "demo_total_changes": None,
+    "demo_gate_failures": None,
+    "demo_expected_failures": DEMO_EXPECTED_FAILURES,
+    "demo_fail_stamped": 0,
 }
 
 LOCK = threading.Lock()
@@ -474,11 +666,26 @@ def status():
     cached = _get_cached_live_metrics()
     payload["latest"] = cached.get("latest")
     payload["effectiveness"] = cached.get("effectiveness")
+    payload["advantage"] = cached.get("advantage")
+    payload["session_summary"] = cached.get("session_summary")
     counts = cached.get("failure_counts", {})
     payload["failure_counts"] = counts
-    payload["failure_count"] = counts.get("gate_jobs_total", 0)
+    # Prefer session_summary gate_failures (aligned with extras) when present.
+    session = cached.get("session_summary") or {}
+    payload["failure_count"] = session.get(
+        "gate_failures", counts.get("gate_jobs_total", 0))
     payload["demo_change_count"] = DEMO_CHANGE_COUNT
     payload["baseline_window"] = DEFAULT_INITIAL_WINDOW
+    payload["expected_failures"] = _session_expected_failures()
+    defaults = default_demo_targets()
+    payload["default_total_changes"] = defaults["total_changes"]
+    payload["default_gate_failures"] = defaults["gate_failures"]
+    payload["default_expected_failures"] = defaults["expected_failures"]
+    with LOCK:
+        if STATE.get("demo_total_changes") is not None:
+            payload["demo_change_count"] = STATE["demo_total_changes"]
+        if STATE.get("demo_gate_failures") is not None:
+            payload["gate_failures_target"] = STATE["demo_gate_failures"]
     return jsonify(payload)
 
 
@@ -1521,10 +1728,7 @@ def _agent_ticks(events: Sequence[dict],
         and e.get("tcp_shadow_window") is not None
     ]
     ticks.sort(key=lambda e: float(e["timestamp"]))
-    if len(ticks) > LIVE_METRICS_MAX_POINTS:
-        step = max(1, len(ticks) // LIVE_METRICS_MAX_POINTS)
-        ticks = ticks[::step][-LIVE_METRICS_MAX_POINTS:]
-    return ticks
+    return downsample_keep_span(ticks, LIVE_METRICS_MAX_POINTS)
 
 
 def _tcp_shadow_events(events: Sequence[dict],
@@ -1539,10 +1743,7 @@ def _tcp_shadow_events(events: Sequence[dict],
         and e.get("window_after") is not None
     ]
     shadows.sort(key=lambda e: float(e["timestamp"]))
-    if len(shadows) > LIVE_METRICS_MAX_POINTS:
-        step = max(1, len(shadows) // LIVE_METRICS_MAX_POINTS)
-        shadows = shadows[::step][-LIVE_METRICS_MAX_POINTS:]
-    return shadows
+    return downsample_keep_span(shadows, LIVE_METRICS_MAX_POINTS)
 
 
 def _windows_at(ticks: Sequence[dict], tcp_events: Sequence[dict],
@@ -1981,6 +2182,16 @@ MINUTES_SAVED_FORMULA = (
     "capped at session wall-clock minutes "
     "(only counts real failure events; idle time does not accumulate)"
 )
+JOB_RUNS_SAVED_FORMULA = (
+    "job_runs_saved (est.) = extra_changes_total "
+    "= Σ max(0, RL_held − TCP_after) over gate failures "
+    "(≈ serial gate job-runs saved when jobs are ~1s; "
+    "minutes_saved = job_runs_saved × avg_job_duration_sec / 60)"
+)
+# Display cap so tiny TCP_after denominators cannot produce absurd % next to
+# modest extras/minutes (raw uncapped value is still exposed).
+ADVANTAGE_PCT_DISPLAY_CAP = float(
+    os.environ.get("RL_ADVANTAGE_PCT_DISPLAY_CAP", "200"))
 
 
 def _count_merged_gate_builds(builds: Sequence[dict]) -> int:
@@ -2062,16 +2273,10 @@ def _minutes_saved_from_change_seconds(
     return round(change_slot_seconds * avg_job_duration_sec / 60.0, 2)
 
 
-def _minutes_saved_from_failures(
-        failures: Sequence[dict],
-        avg_job_duration_sec: float,
-        *,
-        session_duration_min: float = 0.0) -> float:
-    """Bounded, intuitive estimate from discrete gate failures.
+def _extras_total_from_failures(failures: Sequence[dict]) -> int:
+    """Session-total extras vs TCP: Σ max(0, RL_held − TCP_after) over failures.
 
-    minutes_saved = Σ max(0, RL_held − TCP_after) × avg_job_duration / 60
-    capped at session wall-clock minutes so idle time cannot inflate the
-    number into hundreds of minutes.
+    Same discrete sum that drives minutes_saved — not a live queue snapshot.
     """
     total_extra = 0
     for fail in failures:
@@ -2083,6 +2288,21 @@ def _minutes_saved_from_failures(
                 fail.get("tcp_window_after"),
             )
         total_extra += max(0, int(extra or 0))
+    return total_extra
+
+
+def _minutes_saved_from_failures(
+        failures: Sequence[dict],
+        avg_job_duration_sec: float,
+        *,
+        session_duration_min: float = 0.0) -> float:
+    """Bounded, intuitive estimate from discrete gate failures.
+
+    minutes_saved = Σ max(0, RL_held − TCP_after) × avg_job_duration / 60
+    capped at session wall-clock minutes so idle time cannot inflate the
+    number into hundreds of minutes.
+    """
+    total_extra = _extras_total_from_failures(failures)
     raw = total_extra * float(avg_job_duration_sec) / 60.0
     if session_duration_min > 0:
         raw = min(raw, float(session_duration_min))
@@ -2160,6 +2380,39 @@ def _tcp_shrink_near_failure(
     return best[1], best[2]
 
 
+def _session_held_windows(failures: Sequence[dict]) -> dict:
+    """Peak RL / floor TCP (and means) at gate-failure moments this session.
+
+    These are the windows that justify session extras/minutes — not the live
+    end-of-run values, which often reconverge after the queue drains.
+    """
+    rl_vals: List[float] = []
+    tcp_vals: List[float] = []
+    for fail in failures:
+        rl_at = fail.get("rl_window")
+        tcp_at = fail.get("tcp_window_after")
+        if tcp_at is None:
+            tcp_at = fail.get("tcp_window")
+        if rl_at is not None:
+            rl_vals.append(float(rl_at))
+        if tcp_at is not None:
+            tcp_vals.append(float(tcp_at))
+    if not rl_vals and not tcp_vals:
+        return {
+            "rl_held_peak": None,
+            "tcp_after_floor": None,
+            "rl_held_mean": None,
+            "tcp_after_mean": None,
+        }
+    return {
+        "rl_held_peak": max(rl_vals) if rl_vals else None,
+        "tcp_after_floor": min(tcp_vals) if tcp_vals else None,
+        "rl_held_mean": round(sum(rl_vals) / len(rl_vals), 1) if rl_vals else None,
+        "tcp_after_mean": (
+            round(sum(tcp_vals) / len(tcp_vals), 1) if tcp_vals else None),
+    }
+
+
 def _session_impact_summary(
         *,
         minutes_saved: float,
@@ -2170,11 +2423,14 @@ def _session_impact_summary(
         latest_tcp_window: float,
         changes_in_window_rl: int,
         changes_in_window_tcp: int,
-        job_duration_source: str) -> str:
+        job_duration_source: str,
+        extra_changes_total: int = 0,
+        session_rl_held: Optional[float] = None,
+        session_tcp_floor: Optional[float] = None) -> str:
     if minutes_saved < 0.1:
         return (
             "No measurable RL advantage yet this session "
-            f"(RL window {latest_rl_window:.0f}, TCP shadow "
+            f"(live RL window {latest_rl_window:.0f}, TCP shadow "
             f"{latest_tcp_window:.0f}; "
             f"{changes_in_window_rl} vs {changes_in_window_tcp} changes in flight)."
         )
@@ -2182,12 +2438,29 @@ def _session_impact_summary(
         f"measured avg gate job {avg_job_duration_sec:.1f}s"
         if job_duration_source == "measured"
         else f"demo default gate job {avg_job_duration_sec:.1f}s")
+    # Prefer session-total extras (same sum as minutes_saved). Live in-flight
+    # can be 0 after the queue drains even when the run saved real time.
+    session_extras = max(0, int(extra_changes_total or 0))
+    if session_extras <= 0:
+        session_extras = max(0, int(changes_in_window_delta or 0))
+    # Describe failure-time held windows so summary cannot claim live
+    # reconverged 20/20 while also reporting positive session extras.
+    if session_rl_held is not None and session_tcp_floor is not None:
+        window_clause = (
+            f"At gate failures RL held up to {session_rl_held:.0f} while "
+            f"TCP shrank as low as {session_tcp_floor:.0f}"
+        )
+    else:
+        window_clause = (
+            f"TCP shadow shrank to {latest_tcp_window:.0f} while RL held "
+            f"{latest_rl_window:.0f}"
+        )
     text = (
-        f"TCP shadow shrank to {latest_tcp_window:.0f} while RL held "
-        f"{latest_rl_window:.0f} — {changes_in_window_rl} change(s) in flight "
-        f"vs {changes_in_window_tcp} under TCP "
-        f"({changes_in_window_delta} more parallel) — estimated "
-        f"{minutes_saved:.1f} min serial gate time saved ({dur_note})"
+        f"{window_clause} — {session_extras} total extra change-slot(s) "
+        f"vs TCP this session — estimated "
+        f"{session_extras} job-runs saved "
+        f"(~{minutes_saved:.1f} min at {avg_job_duration_sec:.1f}s/job; "
+        f"{dur_note})"
     )
     if session_gate_failures:
         text += f" across {session_gate_failures} gate failure(s)"
@@ -2235,6 +2508,17 @@ def _failure_impact_text(
     return base
 
 
+def _cap_advantage_pct(raw_pct: Optional[float]) -> Tuple[float, bool, Optional[float]]:
+    """Return (display_pct, was_capped, raw_pct)."""
+    if raw_pct is None:
+        return 0.0, False, None
+    raw = float(raw_pct)
+    cap = float(ADVANTAGE_PCT_DISPLAY_CAP)
+    if raw > cap:
+        return round(cap, 1), True, round(raw, 1)
+    return round(raw, 1), False, round(raw, 1)
+
+
 def _compute_session_advantage(
         failures: Sequence[dict],
         rl_series: Sequence[float],
@@ -2249,8 +2533,10 @@ def _compute_session_advantage(
 
       extra_i = max(0, RL_held − TCP_after)_i
       rl_advantage_pct = sum(extra_i) / sum(TCP_after_i) × 100
+      (display-capped at ADVANTAGE_PCT_DISPLAY_CAP)
 
-    Fallback: peak (RL−TCP)/TCP over the window series.
+    Equivalent to (sum RL_held / sum TCP_after − 1) × 100 when extras are
+    exactly RL−TCP. Fallback: peak (RL−TCP)/TCP over the window series.
     """
     extras: List[int] = []
     tcp_denoms: List[int] = []
@@ -2262,11 +2548,12 @@ def _compute_session_advantage(
         extra = fail.get("extra_changes")
         if extra is None:
             extra = _failure_extra_changes(rl_at, tcp_at, None)
-        extras.append(int(extra))
+        extras.append(max(0, int(extra or 0)))
         if tcp_at is not None:
             tcp_denoms.append(max(1, int(round(float(tcp_at)))))
 
-    total_extra = sum(extras)
+    total_extra = _extras_total_from_failures(failures)
+    held = _session_held_windows(failures)
     if tcp_denoms and total_extra > 0:
         cum_pct = round(100.0 * total_extra / sum(tcp_denoms), 1)
     else:
@@ -2280,30 +2567,189 @@ def _compute_session_advantage(
 
     instant = _throughput_efficiency_pct(latest_rl, latest_tcp)
     if cum_pct is not None:
-        advantage = cum_pct
+        raw_advantage = cum_pct
         source = "failure_extra_over_tcp"
     elif peak > 0:
-        advantage = peak
+        raw_advantage = peak
         source = "series_peak"
     elif instant is not None:
-        advantage = instant
+        raw_advantage = instant
         source = "instantaneous"
     else:
-        advantage = 0.0
+        raw_advantage = 0.0
         source = "none"
+
+    advantage, capped, raw = _cap_advantage_pct(raw_advantage)
+    formula = (
+        "sum(extra_changes at each gate failure) / "
+        "sum(TCP_after at those failures) × 100"
+    )
+    if capped and raw is not None:
+        formula += (
+            f" (display capped at {ADVANTAGE_PCT_DISPLAY_CAP:g}%; "
+            f"raw {raw}%)"
+        )
 
     return {
         "extra_changes_total": total_extra,
         "rl_advantage_pct": advantage,
+        "rl_advantage_pct_raw": raw if raw is not None else advantage,
+        "advantage_capped": capped,
         "peak_rl_advantage_pct": peak,
         "instant_rl_advantage_pct": instant,
         "advantage_source": source,
         "extra_changes_per_failure": extras,
-        "advantage_formula": (
-            "sum(extra_changes at each gate failure) / "
-            "sum(TCP window at those failures) × 100"
-        ),
+        "rl_held_peak": held["rl_held_peak"],
+        "tcp_after_floor": held["tcp_after_floor"],
+        "rl_held_mean": held["rl_held_mean"],
+        "tcp_after_mean": held["tcp_after_mean"],
+        "advantage_formula": formula,
     }
+
+
+def _build_session_summary(
+        *,
+        failures: Sequence[dict],
+        advantage: dict,
+        effectiveness: dict,
+        failure_counts: dict,
+        latest: dict,
+        changes_submitted: Optional[int] = None) -> dict:
+    """Single coherent session model for demo summaries / popups.
+
+    Session aggregates (extras, minutes, advantage, held windows, failure
+    count) all derive from the same failures list. Live fields are nested
+    under ``live`` so UI cannot confuse drained-queue snapshots with
+    session totals.
+
+    Headline demo counts (UI Session summary):
+      - changes_submitted / submitted — demo traffic submitted this session
+      - merged / session_changes_merged — successful gate merges
+      - gate_failures — stamped / speculative gate fails ("in conflict" in UI)
+      - extra_changes_total — session extras accommodated vs TCP
+    """
+    fail_n = len(failures)
+    # Prefer failures-list length (extras/minutes basis). Fall back to
+    # build-API count when the list is empty.
+    if fail_n <= 0:
+        fail_n = int(failure_counts.get("gate_jobs_total", 0) or 0)
+    extras = int(advantage.get("extra_changes_total")
+                 if advantage.get("extra_changes_total") is not None
+                 else effectiveness.get("extra_changes_total") or 0)
+    minutes = float(effectiveness.get("minutes_saved") or 0.0)
+    # Keep minutes/extras coherent: positive minutes imply positive extras
+    # (same discrete sum). Cap can shrink minutes but never invent extras.
+    if minutes >= 0.1 and extras <= 0:
+        minutes = 0.0
+    adv_pct = float(advantage.get("rl_advantage_pct") or 0.0)
+    adv_raw = advantage.get("rl_advantage_pct_raw")
+    if adv_raw is None:
+        adv_raw = adv_pct
+    held_rl = advantage.get("rl_held_peak")
+    held_tcp = advantage.get("tcp_after_floor")
+    if held_rl is None or held_tcp is None:
+        held = _session_held_windows(failures)
+        held_rl = held["rl_held_peak"] if held_rl is None else held_rl
+        held_tcp = held["tcp_after_floor"] if held_tcp is None else held_tcp
+
+    merged = int(effectiveness.get("session_changes_merged") or 0)
+    if changes_submitted is None:
+        with LOCK:
+            prog = STATE.get("demo_progress") or {}
+            changes_submitted = int(prog.get("changes_submitted") or 0)
+    else:
+        changes_submitted = max(0, int(changes_submitted or 0))
+
+    return {
+        # Headline demo counts (keep aliases in sync — one model).
+        "changes_submitted": changes_submitted,
+        "submitted": changes_submitted,
+        "merged": merged,
+        "session_changes_merged": merged,
+        # Gate stamped / speculative fails (UI: "Failed (gate)" / in-conflict).
+        "gate_failures": fail_n,
+        "extra_changes_total": extras,
+        "job_runs_saved": job_runs_saved_est(extras),
+        "minutes_saved": minutes,
+        "rl_advantage_pct": adv_pct,
+        "rl_advantage_pct_raw": float(adv_raw),
+        "advantage_capped": bool(advantage.get("advantage_capped")),
+        "advantage_source": advantage.get("advantage_source") or "none",
+        "advantage_formula": advantage.get("advantage_formula") or "",
+        "rl_held_peak": held_rl,
+        "tcp_after_floor": held_tcp,
+        "rl_held_mean": advantage.get("rl_held_mean"),
+        "tcp_after_mean": advantage.get("tcp_after_mean"),
+        "avg_gate_job_duration_sec": float(
+            effectiveness.get("avg_gate_job_duration_sec")
+            or DEFAULT_GATE_JOB_DURATION_SEC),
+        "minutes_saved_formula": (
+            effectiveness.get("minutes_saved_formula") or MINUTES_SAVED_FORMULA),
+        "job_runs_saved_formula": (
+            effectiveness.get("job_runs_saved_formula")
+            or JOB_RUNS_SAVED_FORMULA),
+        "impact_summary": effectiveness.get("impact_summary") or "",
+        "live": {
+            "rl_window": latest.get("rl_window"),
+            "tcp_window": latest.get("tcp_window"),
+            "extra_in_flight": int(latest.get("extra_in_flight") or 0),
+            "gate_queue_count": int(latest.get("gate_queue_count") or 0),
+            "changes_in_window_rl": int(
+                latest.get("changes_in_window_rl") or 0),
+            "changes_in_window_tcp": int(
+                latest.get("changes_in_window_tcp") or 0),
+        },
+    }
+
+
+def session_summary_invariants(summary: dict) -> List[str]:
+    """Return human-readable invariant violations (empty list = consistent)."""
+    violations: List[str] = []
+    extras = int(summary.get("extra_changes_total") or 0)
+    minutes = float(summary.get("minutes_saved") or 0.0)
+    adv = float(summary.get("rl_advantage_pct") or 0.0)
+    fail_n = int(summary.get("gate_failures") or 0)
+    job_runs = summary.get("job_runs_saved")
+    if job_runs is not None and int(job_runs) != extras:
+        violations.append(
+            f"job_runs_saved ({job_runs}) must equal "
+            f"extra_changes_total ({extras})")
+    if minutes >= 0.1 and extras <= 0:
+        violations.append(
+            "minutes_saved > 0 requires extra_changes_total > 0")
+    if extras > 0 and fail_n <= 0:
+        violations.append(
+            "extra_changes_total > 0 requires gate_failures > 0")
+    if adv > float(ADVANTAGE_PCT_DISPLAY_CAP) + 0.05:
+        violations.append(
+            f"rl_advantage_pct {adv} exceeds display cap "
+            f"{ADVANTAGE_PCT_DISPLAY_CAP}")
+    if extras > 0 and adv <= 0 and summary.get("advantage_source") == (
+            "failure_extra_over_tcp"):
+        violations.append(
+            "failure_extra_over_tcp source with extras > 0 must have "
+            "advantage > 0")
+    # Held windows must exist when we claim session extras from failures.
+    if extras > 0:
+        if summary.get("rl_held_peak") is None:
+            violations.append("extras > 0 but rl_held_peak missing")
+        if summary.get("tcp_after_floor") is None:
+            violations.append("extras > 0 but tcp_after_floor missing")
+    # Alias pairs must stay coherent (UI may read either name).
+    submitted = summary.get("changes_submitted")
+    if submitted is not None and summary.get("submitted") is not None:
+        if int(submitted) != int(summary["submitted"]):
+            violations.append(
+                "submitted alias must equal changes_submitted")
+    merged = summary.get("session_changes_merged")
+    if merged is not None and summary.get("merged") is not None:
+        if int(merged) != int(summary["merged"]):
+            violations.append(
+                "merged alias must equal session_changes_merged")
+    if summary.get("changes_submitted") is not None:
+        if int(summary["changes_submitted"]) < 0:
+            violations.append("changes_submitted must be >= 0")
+    return violations
 
 
 def _build_comparison_table(
@@ -2314,73 +2760,146 @@ def _build_comparison_table(
         latest_rl: float,
         latest_tcp: float,
         baseline: int,
-        failure_count: int) -> dict:
-    """Post-run TCP-only vs RL agent comparison for the UI table."""
-    total_extra = int(advantage.get("extra_changes_total") or 0)
-    minutes = float(effectiveness.get("minutes_saved") or 0)
-    rl_peak = latest_rl
-    tcp_floor = latest_tcp
-    for fail in failures:
-        if fail.get("rl_window") is not None:
-            rl_peak = max(rl_peak, float(fail["rl_window"]))
-        tcp_at = fail.get("tcp_window_after")
-        if tcp_at is None:
-            tcp_at = fail.get("tcp_window")
-        if tcp_at is not None:
-            tcp_floor = min(tcp_floor, float(tcp_at))
+        failure_count: int,
+        expected_failures: Optional[int] = None,
+        session_summary: Optional[dict] = None) -> dict:
+    """Post-run TCP-only vs RL agent comparison for the UI table.
+
+    Prefers session_summary fields so the block never contradicts the
+    Session summary cards / charts.
+    """
+    ss = session_summary or {}
+    total_extra = int(
+        ss.get("extra_changes_total")
+        if ss.get("extra_changes_total") is not None
+        else advantage.get("extra_changes_total") or 0)
+    minutes = float(
+        ss.get("minutes_saved")
+        if ss.get("minutes_saved") is not None
+        else effectiveness.get("minutes_saved") or 0)
+    fail_n = int(
+        ss.get("gate_failures")
+        if ss.get("gate_failures") is not None
+        else failure_count)
+    expected_n = expected_failures
+    if expected_n is None:
+        expected_n = _session_expected_failures()
+    expected_n = max(0, int(expected_n))
+    merged = int(
+        ss.get("merged")
+        if ss.get("merged") is not None
+        else ss.get("session_changes_merged")
+        if ss.get("session_changes_merged") is not None
+        else effectiveness.get("session_changes_merged") or 0)
+    submitted = int(
+        ss.get("changes_submitted")
+        if ss.get("changes_submitted") is not None
+        else ss.get("submitted") or 0)
+    rl_peak = ss.get("rl_held_peak")
+    tcp_floor = ss.get("tcp_after_floor")
+    if rl_peak is None or tcp_floor is None:
+        held = _session_held_windows(failures)
+        if rl_peak is None:
+            rl_peak = held.get("rl_held_peak")
+        if tcp_floor is None:
+            tcp_floor = held.get("tcp_after_floor")
+    # Prefer failure-time held windows. Live latest often reconverges after
+    # drain and must not overwrite the session story.
+    if rl_peak is None:
+        rl_peak = float(latest_rl)
+    if tcp_floor is None:
+        tcp_floor = float(latest_tcp)
+    rl_peak = float(rl_peak)
+    tcp_floor = float(tcp_floor)
 
     window_benefit = round(rl_peak - tcp_floor, 1)
+    adv_pct = ss.get("rl_advantage_pct")
+    if adv_pct is None:
+        adv_pct = advantage.get("rl_advantage_pct", 0)
+    job_runs = int(
+        ss.get("job_runs_saved")
+        if ss.get("job_runs_saved") is not None
+        else job_runs_saved_est(total_extra))
+    if job_runs != total_extra:
+        job_runs = total_extra
     rows = [
         {
-            "metric": "Window after failures",
+            "metric": "Changes submitted (session)",
+            "tcp_only": submitted,
+            "with_rl": submitted,
+            "benefit": "same load",
+        },
+        {
+            "metric": "Merged (successful gate)",
+            "tcp_only": merged,
+            "with_rl": merged,
+            "benefit": "same merges",
+        },
+        {
+            "metric": "Failed (gate) / in conflict (actual / expected)",
+            "tcp_only": f"{fail_n}/{expected_n}",
+            "with_rl": f"{fail_n}/{expected_n}",
+            "benefit": "same load",
+        },
+        {
+            "metric": "Extra accommodated vs TCP (session total)",
+            "tcp_only": 0,
+            "with_rl": total_extra,
+            "benefit": total_extra,
+        },
+        {
+            "metric": "Window at failures (RL peak / TCP floor)",
             "tcp_only": int(round(tcp_floor)),
             "with_rl": int(round(rl_peak)),
             "benefit": f"+{int(round(window_benefit))}" if window_benefit > 0
             else str(int(round(window_benefit))),
         },
         {
-            "metric": "Extra changes accommodated (total)",
+            "metric": "Est. job-runs saved (session)",
             "tcp_only": 0,
-            "with_rl": total_extra,
-            "benefit": total_extra,
-        },
-        {
-            "metric": "Gate failures handled",
-            "tcp_only": failure_count,
-            "with_rl": failure_count,
-            "benefit": "same load",
-        },
-        {
-            "metric": "Est. minutes saved",
-            "tcp_only": 0,
-            "with_rl": minutes,
-            "benefit": minutes,
+            "with_rl": job_runs,
+            "benefit": job_runs,
         },
         {
             "metric": "RL advantage vs TCP (%)",
             "tcp_only": "0%",
-            "with_rl": f"{advantage.get('rl_advantage_pct', 0)}%",
-            "benefit": f"+{advantage.get('rl_advantage_pct', 0)}%",
+            "with_rl": f"{adv_pct}%",
+            "benefit": f"+{adv_pct}%",
         },
     ]
-    if total_extra > 0 or minutes >= 0.1:
+    if total_extra > 0 or job_runs > 0:
+        mins_note = (
+            f" (~{minutes} min at ~1s jobs)" if minutes >= 0.1 else "")
         summary = (
-            f"Across {failure_count} gate failure(s), TCP shrank toward "
-            f"{int(round(tcp_floor))} while RL held near {int(round(rl_peak))} — "
-            f"{total_extra} extra change-slot(s) and ~{minutes} min saved "
-            f"({advantage.get('rl_advantage_pct', 0)}% advantage)."
+            f"After run: {submitted} submitted, {merged} merged, "
+            f"{fail_n}/{expected_n} failed (gate), "
+            f"TCP floor {int(round(tcp_floor))} vs RL peak "
+            f"{int(round(rl_peak))} — {total_extra} extra accommodated vs "
+            f"TCP / {job_runs} job-runs saved{mins_note}, "
+            f"{adv_pct}% advantage."
         )
     else:
         summary = (
-            f"Baseline windows started at {baseline}. "
-            "No measurable RL>TCP divergence yet this session."
+            f"After run: {submitted} submitted, {merged} merged, "
+            f"{fail_n}/{expected_n} failed (gate) "
+            f"(baseline window {baseline}). "
+            "No measurable RL>TCP extras yet this session."
         )
     return {
         "columns": ["Metric", "If TCP only", "With RL agent", "Benefit"],
         "rows": rows,
         "summary": summary,
+        "changes_submitted": submitted,
+        "submitted": submitted,
         "extra_changes_total": total_extra,
-        "rl_advantage_pct": advantage.get("rl_advantage_pct", 0),
+        "job_runs_saved": job_runs,
+        "rl_advantage_pct": adv_pct,
+        "rl_held_peak": rl_peak,
+        "tcp_after_floor": tcp_floor,
+        "gate_failures": fail_n,
+        "expected_failures": expected_n,
+        "merged": merged,
+        "session_changes_merged": merged,
     }
 
 
@@ -2415,6 +2934,7 @@ def _compute_effectiveness_metrics(
             max(now - float(session_start), 0.0) / 60.0, 2)
     # Primary: discrete per-failure estimate (bounded, no idle runaway).
     fail_list = list(failures or [])
+    extra_changes_total = _extras_total_from_failures(fail_list)
     if fail_list:
         minutes_saved = _minutes_saved_from_failures(
             fail_list, avg_job_duration_sec,
@@ -2434,9 +2954,14 @@ def _compute_effectiveness_metrics(
         changes_in_window_delta = max(
             changes_in_window_delta,
             int(round(latest_rl_window)) - int(round(latest_tcp_window)))
-    session_gate_failures = failure_counts.get("gate_jobs_total", 0)
-    if not session_gate_failures and fail_list:
+    # Failures list is the canonical basis for extras/minutes — keep the
+    # displayed failure count aligned with that list.
+    if fail_list:
         session_gate_failures = len(fail_list)
+    else:
+        session_gate_failures = int(
+            failure_counts.get("gate_jobs_total", 0) or 0)
+    held = _session_held_windows(fail_list)
     impact_summary = _session_impact_summary(
         minutes_saved=minutes_saved,
         changes_in_window_delta=changes_in_window_delta,
@@ -2447,16 +2972,22 @@ def _compute_effectiveness_metrics(
         changes_in_window_rl=changes_in_window_rl,
         changes_in_window_tcp=changes_in_window_tcp,
         job_duration_source=job_duration_source,
+        extra_changes_total=extra_changes_total,
+        session_rl_held=held.get("rl_held_peak"),
+        session_tcp_floor=held.get("tcp_after_floor"),
     )
 
     return {
         "minutes_saved": minutes_saved,
         "minutes_saved_formula": MINUTES_SAVED_FORMULA,
+        "job_runs_saved": job_runs_saved_est(extra_changes_total),
+        "job_runs_saved_formula": JOB_RUNS_SAVED_FORMULA,
         "cumulative_slot_seconds": round(slot_seconds, 1),
         "cumulative_change_slot_seconds": round(change_slot_seconds, 1),
         "window_delta": window_delta,
         "parallelism_gain": window_delta,
         "changes_in_window_delta": changes_in_window_delta,
+        "extra_changes_total": extra_changes_total,
         "throughput_efficiency_pct": latest_efficiency_pct,
         "changes_in_window_rl": changes_in_window_rl,
         "changes_in_window_tcp": changes_in_window_tcp,
@@ -2472,6 +3003,8 @@ def _compute_effectiveness_metrics(
         "session_gate_cycle_failures": failure_counts.get(
             "gate_cycles_total", 0),
         "session_duration_min": session_duration_min,
+        "rl_held_peak": held.get("rl_held_peak"),
+        "tcp_after_floor": held.get("tcp_after_floor"),
         "impact_summary": impact_summary,
     }
 
@@ -2507,6 +3040,7 @@ def _fetch_live_gate_state(api_url: str) -> Optional[dict]:
             "changes_in_window_tcp": tcp_in,
             "decision_reason": queue.get("decision_reason") or "",
             "decision_source": queue.get("decision_source") or "",
+            "decision_detail": queue.get("decision_detail") or "",
             "queue_saturated": queue_is_saturated(gate_count, rl_f, tcp_f),
             "queue_target": queue_saturation_target(rl_f, tcp_f),
         }
@@ -2746,25 +3280,24 @@ def build_live_metrics() -> dict:
     effectiveness["peak_rl_advantage_pct"] = advantage["peak_rl_advantage_pct"]
     effectiveness["advantage_source"] = advantage["advantage_source"]
     effectiveness["advantage_formula"] = advantage["advantage_formula"]
+    effectiveness["rl_advantage_pct_raw"] = advantage.get("rl_advantage_pct_raw")
+    effectiveness["advantage_capped"] = advantage.get("advantage_capped", False)
+    effectiveness["rl_held_peak"] = advantage.get("rl_held_peak")
+    effectiveness["tcp_after_floor"] = advantage.get("tcp_after_floor")
+
+    # Canonical failure count matches the failures list used for extras.
+    session_fail_n = len(failures) if failures else int(
+        failure_counts.get("gate_jobs_total", 0) or 0)
+    effectiveness["session_gate_failures"] = session_fail_n
 
     demo_phase = None
+    session_submitted = 0
     with LOCK:
         prog = STATE.get("demo_progress") or {}
         demo_phase = prog.get("phase")
+        session_submitted = int(prog.get("changes_submitted") or 0)
         demo_done = (demo_phase == "done") or (
             not STATE.get("running") and bool(STATE.get("latest_run")))
-
-    comparison = None
-    if demo_done or failures:
-        comparison = _build_comparison_table(
-            failures=failures,
-            advantage=advantage,
-            effectiveness=effectiveness,
-            latest_rl=last_rl_window,
-            latest_tcp=last_tcp_window,
-            baseline=DEFAULT_INITIAL_WINDOW,
-            failure_count=failure_counts.get("gate_jobs_total", len(failures)),
-        )
 
     mode = ticks[-1].get("mode") if ticks else None
     latest = {
@@ -2785,6 +3318,11 @@ def build_live_metrics() -> dict:
         "changes_in_window_tcp": changes_in_window_tcp,
         "extra_in_flight": live_extra,
         "extra_changes_total": advantage["extra_changes_total"],
+        "job_runs_saved": effectiveness.get(
+            "job_runs_saved",
+            job_runs_saved_est(advantage["extra_changes_total"])),
+        "rl_held_peak": advantage.get("rl_held_peak"),
+        "tcp_after_floor": advantage.get("tcp_after_floor"),
         "gate_queue_count": gate_queue_count,
         "queue_depth": gate_queue_count,
         "queue_saturated": queue_is_saturated(
@@ -2795,10 +3333,36 @@ def build_live_metrics() -> dict:
             live_state.get("decision_reason") if live_state else None),
         "rl_decision_source": (
             live_state.get("decision_source") if live_state else None),
+        "rl_decision_detail": (
+            live_state.get("decision_detail") if live_state else None),
         "avg_gate_job_duration_sec": effectiveness[
             "avg_gate_job_duration_sec"],
         "minutes_saved_formula": MINUTES_SAVED_FORMULA,
+        "job_runs_saved_formula": JOB_RUNS_SAVED_FORMULA,
     }
+
+    session_summary = _build_session_summary(
+        failures=failures,
+        advantage=advantage,
+        effectiveness=effectiveness,
+        failure_counts=failure_counts,
+        latest=latest,
+        changes_submitted=session_submitted,
+    )
+
+    comparison = None
+    if demo_done or failures:
+        comparison = _build_comparison_table(
+            failures=failures,
+            advantage=advantage,
+            effectiveness=effectiveness,
+            latest_rl=last_rl_window,
+            latest_tcp=last_tcp_window,
+            baseline=DEFAULT_INITIAL_WINDOW,
+            failure_count=session_fail_n,
+            expected_failures=_session_expected_failures(),
+            session_summary=session_summary,
+        )
 
     # Rebuild efficiency series from window series so the chart shows
     # meaningful divergence (not a flat 0% after reconvergence).
@@ -2808,6 +3372,9 @@ def build_live_metrics() -> dict:
     if rebuilt_eff:
         rebuilt_eff[-1] = display_efficiency
 
+    defaults = default_demo_targets()
+    with LOCK:
+        demo_change = STATE.get("demo_total_changes")
     return {
         "timestamps": timestamps,
         "rl_window": rl_series,
@@ -2820,15 +3387,19 @@ def build_live_metrics() -> dict:
         "latest": latest,
         "comparison": comparison,
         "advantage": advantage,
+        "session_summary": session_summary,
         "demo_phase": demo_phase,
         "updated_at": time.time(),
         "session_start": session_start,
         "baseline_window": DEFAULT_INITIAL_WINDOW,
-        "demo_change_count": DEMO_CHANGE_COUNT,
+        "demo_change_count": (
+            demo_change if demo_change is not None else DEMO_CHANGE_COUNT),
         "demo_batch_size": DEMO_BATCH_SIZE,
         "demo_duration_sec": DEMO_DURATION_SEC,
         "expected_failures_min": DEMO_FAIL_PER_BATCH,
-        "expected_failures": DEMO_EXPECTED_FAILURES,
+        "expected_failures": _session_expected_failures(),
+        "default_total_changes": defaults["total_changes"],
+        "default_gate_failures": defaults["gate_failures"],
         "fail_per_batch": DEMO_FAIL_PER_BATCH,
         "pass_per_batch": DEMO_PASS_PER_BATCH,
     }
@@ -2843,6 +3414,11 @@ def live_metrics():
 def run_demo():
     if request.method == "OPTIONS":
         return ("", 204)
+    body = request.get_json(silent=True) or {}
+    params, err = parse_run_demo_params(body)
+    if err:
+        return jsonify({"ok": False, "message": err}), 400
+    assert params is not None
     with LOCK:
         if STATE["running"]:
             prog = _demo_progress_snapshot()
@@ -2858,13 +3434,28 @@ def run_demo():
         STATE["started_at"] = started
         STATE["finished_at"] = None
         STATE["last_error"] = None
+        STATE["demo_total_changes"] = params["total_changes"]
+        STATE["demo_gate_failures"] = params["gate_failures"]
+        STATE["demo_expected_failures"] = params["expected_failures"]
+        STATE["demo_fail_stamped"] = 0
     session_start = _request_demo_reset()
     _reset_audit_reader()
     _invalidate_live_metrics_cache()
+    target_msg = ""
+    if params["total_changes"] is not None or params["gate_failures"] is not None:
+        bits = []
+        if params["total_changes"] is not None:
+            bits.append(f"{params['total_changes']} changes")
+        if params["gate_failures"] is not None:
+            bits.append(f"{params['gate_failures']} gate failures")
+        target_msg = " — " + ", ".join(bits)
     _set_demo_progress(
         demo_id=demo_id,
         phase="starting",
-        message="Demo session starting — resetting RL/TCP windows to baseline",
+        message=(
+            "Demo session starting — resetting RL/TCP windows to baseline"
+            + target_msg
+        ),
         started_at=started,
         percent=2,
         queues_cleared=0,
@@ -2873,6 +3464,9 @@ def run_demo():
         failures_so_far=0,
         wait_elapsed_s=0.0,
         wait_total_s=_effective_demo_gate_wait_sec(),
+        total_changes=params["total_changes"],
+        gate_failures_target=params["gate_failures"],
+        expected_failures=params["expected_failures"],
     )
     thread = threading.Thread(
         target=_run_demo_background, args=(demo_id,), daemon=True)
@@ -2884,6 +3478,9 @@ def run_demo():
         "phase": "starting",
         "session_start": session_start,
         "baseline_window": DEFAULT_INITIAL_WINDOW,
+        "total_changes": params["total_changes"],
+        "gate_failures": params["gate_failures"],
+        "expected_failures": params["expected_failures"],
     })
 
 
@@ -2937,34 +3534,85 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
     """Push batches every DEMO_BATCH_INTERVAL_SEC for DEMO_DURATION_SEC.
 
     Honours extend_batches (does not cancel in-flight builds) and traffic_stop.
+    When demo_total_changes / demo_gate_failures are set (via /run-demo),
+    stops after the change target and stamps fails to hit the fail target.
     """
     sys_path_traffic = str(TRAFFIC_DIR / "traffic")
     if sys_path_traffic not in sys.path:
         sys.path.insert(0, sys_path_traffic)
     import generator as traffic_gen  # type: ignore
 
-    started = time.time()
     with LOCK:
-        # Full DEMO_DURATION_SEC of traffic measured from the first batch —
+        target_total = STATE.get("demo_total_changes")
+        target_fails = STATE.get("demo_gate_failures")
+        expected_fails = int(
+            STATE.get("demo_expected_failures") or DEMO_EXPECTED_FAILURES)
+        STATE["demo_fail_stamped"] = 0
+
+    if target_total is not None:
+        target_total = max(0, int(target_total))
+    if target_fails is not None:
+        target_fails = max(0, int(target_fails))
+
+    started = time.time()
+    # Size the deadline so duration alone cannot strand change/fail targets.
+    duration = DEMO_DURATION_SEC
+    if target_total is not None and target_total > 0:
+        est_batches = max(
+            1, int(math.ceil(target_total / max(DEMO_BATCH_SIZE, 1))))
+        duration = max(
+            duration,
+            est_batches * DEMO_BATCH_INTERVAL_SEC + 120.0)
+    if target_fails is not None and target_fails > 0:
+        est_fail_batches = max(
+            1, int(math.ceil(target_fails / max(DEMO_BATCH_SIZE, 1))))
+        # Extra slack for check timeouts / skips that need catch-up batches.
+        duration = max(
+            duration,
+            est_fail_batches * DEMO_BATCH_INTERVAL_SEC + 180.0)
+    with LOCK:
+        # Full duration of traffic measured from the first batch —
         # setup phases (layout sync, queue clear) must not eat into it.
-        deadline = started + DEMO_DURATION_SEC
+        deadline = started + duration
         STATE["traffic_deadline"] = deadline
         STATE["batches_completed"] = 0
         STATE["traffic_stop"] = False
 
     planned = _planned_batches(max(0.0, deadline - started))
+    if target_total is not None and target_total > 0:
+        planned = max(
+            planned,
+            int(math.ceil(target_total / max(DEMO_BATCH_SIZE, 1))))
+    plan_tip = _batches_plan_tip(
+        planned,
+        target_total=target_total,
+        duration_sec=max(0.0, deadline - started),
+    )
+    fail_note = (
+        f"{target_fails} fail stamps target"
+        if target_fails is not None
+        else f"{DEMO_FAIL_PER_BATCH} fail + {DEMO_PASS_PER_BATCH} pass / batch")
+    change_note = (
+        f"{target_total} changes"
+        if target_total is not None
+        else f"~{int(duration / 60)} min")
     _set_demo_progress(
         phase="submitting_traffic",
         traffic_active=True,
         batches_planned=planned,
         batches_completed=0,
         batches_remaining=planned,
+        batch_current=0,
+        batches_plan_tip=plan_tip,
         extend_available=True,
         time_remaining_s=round(max(0.0, deadline - time.time()), 1),
+        total_changes=target_total,
+        gate_failures_target=target_fails,
+        expected_failures=expected_fails,
         message=(
             f"Continuous traffic: {DEMO_BATCH_SIZE} changes every "
-            f"{int(DEMO_BATCH_INTERVAL_SEC)}s for ~{int(DEMO_DURATION_SEC / 60)} min "
-            f"({DEMO_FAIL_PER_BATCH} fail + {DEMO_PASS_PER_BATCH} pass / batch)"
+            f"{int(DEMO_BATCH_INTERVAL_SEC)}s for {change_note} "
+            f"({fail_note})"
         ),
         percent=22,
     )
@@ -2972,10 +3620,30 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
 
     batch_num = 0
     total_submitted = 0
+    total_fail_stamped = 0
+    catch_up_rounds = 0
+    max_catch_up_rounds = 8
     all_change_ids: List[str] = []
 
     while True:
         if _traffic_should_stop():
+            break
+        remaining_fails_now = (
+            max(0, target_fails - total_fail_stamped)
+            if target_fails is not None else 0)
+        hit_change_cap = (
+            target_total is not None and total_submitted >= target_total)
+        # Hit change cap with fail budget still open → catch-up batch of
+        # remaining fail stamps (does not count against the change cap).
+        catch_up_fails = bool(
+            hit_change_cap and target_fails is not None
+            and remaining_fails_now > 0
+            and catch_up_rounds < max_catch_up_rounds)
+        if hit_change_cap and not catch_up_fails:
+            break
+        if (target_fails is not None and target_fails > 0
+                and total_fail_stamped >= target_fails
+                and (target_total is None or hit_change_cap)):
             break
         now = time.time()
         extend_n = _pop_extend_batches()
@@ -2987,15 +3655,26 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                     extend_n * DEMO_BATCH_INTERVAL_SEC)
                 deadline = float(STATE["traffic_deadline"])
 
+        needs_fail_catchup = (
+            target_fails is not None
+            and total_fail_stamped < target_fails
+            and catch_up_rounds < max_catch_up_rounds)
         if batch_num > 0 and now >= deadline and extend_n <= 0:
-            # Allow one more batch if extend just arrived.
-            extend_n = _pop_extend_batches()
-            if extend_n <= 0:
-                break
-            with LOCK:
-                STATE["traffic_deadline"] = now + (
-                    extend_n * DEMO_BATCH_INTERVAL_SEC)
-                deadline = float(STATE["traffic_deadline"])
+            if needs_fail_catchup or catch_up_fails:
+                # Extend just enough for one more catch-up batch.
+                with LOCK:
+                    STATE["traffic_deadline"] = (
+                        now + DEMO_BATCH_INTERVAL_SEC + 30.0)
+                    deadline = float(STATE["traffic_deadline"])
+            else:
+                # Allow one more batch if extend just arrived.
+                extend_n = _pop_extend_batches()
+                if extend_n <= 0:
+                    break
+                with LOCK:
+                    STATE["traffic_deadline"] = now + (
+                        extend_n * DEMO_BATCH_INTERVAL_SEC)
+                    deadline = float(STATE["traffic_deadline"])
 
         failures = _live_failure_count()
         remaining = max(0.0, deadline - time.time())
@@ -3008,20 +3687,67 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         pre_rl = float(pre_live.get("rl_window") or DEFAULT_INITIAL_WINDOW)
         pre_tcp = float(pre_live.get("tcp_window") or DEFAULT_INITIAL_WINDOW)
         batch_size = adaptive_batch_size(pre_depth, pre_rl, pre_tcp)
-        # Deterministic fail ratio scales with batch size (half fail).
-        fail_n = max(1, round(
-            batch_size * DEMO_FAIL_PER_BATCH / max(DEMO_BATCH_SIZE, 1)))
+        if catch_up_fails:
+            # Dedicated fail-stamp top-up after the change cap.
+            batch_size = min(
+                max(1, remaining_fails_now), DEMO_MAX_BATCH_SIZE)
+        elif target_total is not None:
+            remaining_changes = max(0, target_total - total_submitted)
+            if remaining_changes <= 0 and not needs_fail_catchup:
+                break
+            if remaining_changes > 0:
+                batch_size = min(batch_size, remaining_changes)
+
+        if target_fails is not None:
+            remaining_fails = max(0, target_fails - total_fail_stamped)
+            if remaining_fails <= 0 and (
+                    target_total is None or total_submitted >= target_total):
+                break
+            if catch_up_fails:
+                fail_n = min(batch_size, remaining_fails)
+            elif target_total is not None:
+                remaining_changes = max(0, target_total - total_submitted)
+                if remaining_changes <= 0:
+                    fail_n = min(batch_size, remaining_fails)
+                else:
+                    fail_n = fails_for_batch(
+                        batch_size, remaining_changes, remaining_fails)
+            else:
+                # Duration mode with an absolute fail target.
+                batches_left = max(
+                    1, int(remaining // DEMO_BATCH_INTERVAL_SEC) + 1)
+                fail_n = fails_for_duration_batch(
+                    batch_size, remaining_fails, batches_left)
+        elif batch_size > 0 and DEMO_FAIL_PER_BATCH > 0:
+            # Deterministic fail ratio scales with batch size (half fail).
+            fail_n = max(1, round(
+                batch_size * DEMO_FAIL_PER_BATCH / max(DEMO_BATCH_SIZE, 1)))
+        else:
+            fail_n = 0
+        fail_n = min(int(fail_n), batch_size)
+        if batch_size <= 0:
+            break
         target = queue_saturation_target(pre_rl, pre_tcp)
         topup_note = (
             f" · queue {pre_depth} < target {target} — topping up"
-            if batch_size > DEMO_BATCH_SIZE else ""
+            if batch_size > DEMO_BATCH_SIZE and not catch_up_fails else ""
         )
+        if catch_up_fails:
+            topup_note = (
+                f" · fail catch-up ({remaining_fails_now} stamps left)"
+            )
         _set_demo_progress(
             phase="submitting_traffic",
             traffic_active=True,
             batches_completed=batch_num,
             batches_planned=max(planned, batch_num + 1),
             batches_remaining=max(0, int(remaining // DEMO_BATCH_INTERVAL_SEC)),
+            batch_current=batch_num + 1,
+            batches_plan_tip=_batches_plan_tip(
+                max(planned, batch_num + 1),
+                target_total=target_total,
+                duration_sec=max(0.0, deadline - started),
+            ),
             changes_submitted=total_submitted,
             failures_so_far=failures,
             time_remaining_s=round(remaining, 1),
@@ -3029,6 +3755,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
             gate_queue_depth=pre_depth,
             queue_saturated=queue_is_saturated(pre_depth, pre_rl, pre_tcp),
             queue_target=target,
+            expected_failures=expected_fails,
             message=(
                 f"Batch {batch_num + 1} — pushing {batch_size} changes "
                 f"({fail_n} fail + {batch_size - fail_n} pass)"
@@ -3086,8 +3813,14 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                     f"({type(exc).__name__}) — continuing with next batch"
                 ),
             )
-            result = {"submitted": 0, "change_ids": []}
+            result = {"submitted": 0, "change_ids": [], "fail_stamped": 0}
         total_submitted += int(result.get("submitted") or 0)
+        stamped = int(result.get("fail_stamped") or 0)
+        total_fail_stamped += stamped
+        if catch_up_fails:
+            catch_up_rounds += 1
+        with LOCK:
+            STATE["demo_fail_stamped"] = total_fail_stamped
         all_change_ids.extend(result.get("change_ids") or [])
         batch_num += 1
         with LOCK:
@@ -3096,6 +3829,13 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         live = _fetch_live_gate_state(ZUUL_API) or {}
         _set_demo_progress(
             batches_completed=batch_num,
+            batch_current=batch_num,
+            batches_planned=max(planned, batch_num),
+            batches_plan_tip=_batches_plan_tip(
+                max(planned, batch_num),
+                target_total=target_total,
+                duration_sec=max(0.0, deadline - started),
+            ),
             changes_submitted=total_submitted,
             failures_so_far=_live_failure_count(),
             gate_queue_depth=live.get("gate_queue_count", 0),
@@ -3107,7 +3847,11 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                 float(live.get("tcp_window") or DEFAULT_INITIAL_WINDOW),
             ),
             time_remaining_s=round(max(0.0, deadline - time.time()), 1),
+            expected_failures=expected_fails,
         )
+
+        if target_total is not None and total_submitted >= target_total:
+            break
 
         # Sleep until next batch interval (interruptible for extend/stop).
         batch_started = time.time()
@@ -3115,6 +3859,12 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         while True:
             if _traffic_should_stop():
                 break
+            if target_total is not None and total_submitted >= target_total:
+                # Keep sleeping only if fail catch-up is still needed; otherwise
+                # exit the interval wait and let the outer loop catch up / stop.
+                if (target_fails is None
+                        or total_fail_stamped >= target_fails):
+                    break
             extend_n = _pop_extend_batches()
             if extend_n > 0:
                 with LOCK:
@@ -3126,10 +3876,13 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
             if elapsed >= DEMO_BATCH_INTERVAL_SEC:
                 break
             if time.time() >= deadline and not int(STATE.get("extend_batches") or 0):
-                # Finish interval only if no pending extend.
+                # Finish interval only if no pending extend and no fail shortfall.
                 with LOCK:
                     pending = int(STATE.get("extend_batches") or 0)
                 if pending <= 0 and time.time() >= deadline:
+                    if (target_fails is not None
+                            and total_fail_stamped < target_fails):
+                        break  # outer loop will catch up
                     break
             # Live heartbeat between batches (~every 3s): windows, queue
             # depth and countdown keep moving so the panel never idles.
@@ -3155,6 +3908,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                     extra_in_flight=extra_changes_in_flight(
                         live_depth, live_rl, live_tcp),
                     time_remaining_s=round(remaining, 1),
+                    expected_failures=expected_fails,
                     message=(
                         f"Batch {batch_num} done — next batch in "
                         f"{until_next:.0f}s · gate queue {live_depth} "
@@ -3167,7 +3921,19 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
 
         if _traffic_should_stop():
             break
+        if (target_total is not None and total_submitted >= target_total
+                and (target_fails is None
+                     or total_fail_stamped >= target_fails)):
+            break
+        if (target_fails is not None and target_fails > 0
+                and total_fail_stamped >= target_fails
+                and target_total is None):
+            break
         if time.time() >= deadline:
+            if (target_fails is not None
+                    and total_fail_stamped < target_fails):
+                # Outer loop starts another catch-up batch.
+                continue
             extend_n = _pop_extend_batches()
             if extend_n <= 0:
                 break
@@ -3179,6 +3945,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
     return {
         "batches": batch_num,
         "submitted": total_submitted,
+        "fail_stamped": total_fail_stamped,
         "duration_sec": round(time.time() - started, 1),
     }
 
