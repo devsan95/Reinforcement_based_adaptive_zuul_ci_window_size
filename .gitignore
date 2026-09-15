@@ -27,3 +27,6 @@ node_modules
 yarn-error.log
 tools/ca/
 /.vs
+
+# local GitHub REST-API upload helper (contains a PAT) -- never commit
+_upload_state/
