@@ -23,6 +23,11 @@ class FailureCountTests(unittest.TestCase):
     def test_gate_job_failure_detection(self):
         self.assertFalse(_is_gate_job_failure({"result": "SUCCESS"}))
         self.assertFalse(_is_gate_job_failure({"result": "MERGE"}))
+        self.assertFalse(_is_gate_job_failure({"result": "MERGE_CONFLICT"}))
+        self.assertFalse(_is_gate_job_failure({"result": "SKIPPED"}))
+        self.assertFalse(_is_gate_job_failure({"result": "RETRY"}))
+        self.assertFalse(_is_gate_job_failure({"result": "NEW"}))
+        self.assertFalse(_is_gate_job_failure({"result": ""}))
         self.assertTrue(_is_gate_job_failure({"result": "FAILURE"}))
 
     def test_tcp_shrink_detection(self):

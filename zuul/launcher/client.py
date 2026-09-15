@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import json
 import logging
 import threading
 import time
@@ -128,6 +129,54 @@ class LauncherClient:
         path = ProviderNode._getPath(node_id)
         with self.createZKContext(None, self.log) as ctx:
             return ProviderNode.fromZK(ctx, path)
+
+    def getProviderNodeIds(self):
+        """List provider node ids from ZK.
+
+        The scheduler has no NodeCache; this is a one-shot children
+        listing, same pattern as :meth:`getRequestIds`.
+        """
+        path = f'{ProviderNode.ROOT}/{ProviderNode.NODES_PATH}'
+        try:
+            return self.zk_client.client.get_children(path)
+        except NoNodeError:
+            return []
+
+    def listProviderNodeSummaries(self):
+        """Return lightweight node dicts for capacity observation.
+
+        Each item has uuid, state, main_node_id, subnodes, slot.
+        Slot-hosts (state ``slot-host``) are included so callers can
+        skip them; READY / IN-USE subnodes are the job slots.
+        Avoids constructing full ProviderNode objects on every RL tick.
+        """
+        path = f'{ProviderNode.ROOT}/{ProviderNode.NODES_PATH}'
+        try:
+            node_ids = self.zk_client.client.get_children(path)
+        except NoNodeError:
+            return []
+        summaries = []
+        for node_id in node_ids:
+            try:
+                data, _stat = self.zk_client.client.get(f'{path}/{node_id}')
+            except NoNodeError:
+                continue
+            if not data:
+                continue
+            try:
+                raw = json.loads(data.decode('utf-8'))
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            summaries.append({
+                "uuid": raw.get("uuid") or node_id,
+                "state": raw.get("state"),
+                "main_node_id": raw.get("main_node_id"),
+                "subnodes": raw.get("subnodes") or [],
+                "slot": raw.get("slot"),
+            })
+        return summaries
 
     def getNodesetInfo(self, request):
         # TODO: populated other nodeset info fields

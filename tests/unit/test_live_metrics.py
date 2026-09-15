@@ -68,7 +68,7 @@ class LiveMetricsTests(unittest.TestCase):
     ]
     ticks = server._agent_ticks(events, session_start=100.0)
     tcp_events = server._tcp_shadow_events(events, session_start=100.0)
-    timestamps, rl_series, tcp_series, _, _ = server._build_window_series(
+    timestamps, rl_series, tcp_series, _, _, *_ = server._build_window_series(
       ticks, tcp_events, builds=[], session_start=100.0)
 
     self.assertIn(21.0, tcp_series)
@@ -356,6 +356,121 @@ class LiveMetricsTests(unittest.TestCase):
           server.STATE["demo_expected_failures"] = prev_exp
     self.assertEqual(metrics["demo_change_count"], 42)
     self.assertEqual(metrics["expected_failures"], 7)
+
+
+  def test_parse_executor_prefers_available_slots_and_ratio(self):
+    slots, ratio, cap, in_use = server._parse_executor_from_event({
+      "available_slots": 12,
+      "executor_capacity": 50,
+      "executor_in_use": 38,
+      "executor_available": 0.24,
+    })
+    self.assertEqual(slots, 12)
+    self.assertAlmostEqual(ratio, 0.24)
+    self.assertEqual(cap, 50)
+    self.assertEqual(in_use, 38)
+
+  def test_parse_executor_legacy_integer_available(self):
+    slots, ratio, cap, in_use = server._parse_executor_from_event({
+      "executor_available": 7,
+      "executor_capacity": 50,
+    })
+    self.assertEqual(slots, 7)
+    self.assertAlmostEqual(ratio, 7 / 50)
+    self.assertEqual(cap, 50)
+    self.assertEqual(in_use, 43)
+
+  def test_live_metrics_executor_series_aligns_with_windows(self):
+    """Full-session series: free slots change even when the window holds."""
+    base = 1000.0
+    audit = [
+      {"timestamp": base, "event": "agent_started"},
+      {
+        "timestamp": base + 10.0,
+        "event": "agent_tick",
+        "actual_window": 8,
+        "tcp_shadow_window": 8,
+        "available_slots": 40,
+        "executor_capacity": 50,
+        "executor_in_use": 10,
+        "executor_available": 0.8,
+        "mode": "active",
+      },
+      {
+        "timestamp": base + 40.0,
+        "event": "agent_tick",
+        "actual_window": 8,
+        "tcp_shadow_window": 8,
+        "available_slots": 3,
+        "executor_capacity": 50,
+        "executor_in_use": 47,
+        "executor_available": 0.06,
+        "mode": "active",
+      },
+      {
+        "timestamp": base + 70.0,
+        "event": "agent_tick",
+        "actual_window": 4,
+        "tcp_shadow_window": 8,
+        "available_slots": 3,
+        "executor_capacity": 50,
+        "executor_in_use": 47,
+        "executor_available": 0.06,
+        "mode": "active",
+      },
+    ]
+    with mock.patch.object(server, "_load_audit_events", return_value=audit), \
+         mock.patch.object(server, "fetch_builds", return_value=[]), \
+         mock.patch.object(server, "_effective_session_start",
+                           return_value=base), \
+         mock.patch.object(server, "_fetch_live_gate_state", return_value={
+           "rl_window": 4.0,
+           "tcp_window": 8.0,
+           "gate_queue_count": 4,
+           "changes_in_window_rl": 4,
+           "changes_in_window_tcp": 4,
+           "available_slots": 3,
+           "executor_capacity": 50,
+           "executor_in_use": 47,
+           "executor_available": 0.06,
+         }):
+      metrics = server.build_live_metrics()
+
+    self.assertEqual(len(metrics["available_slots"]), len(metrics["timestamps"]))
+    self.assertEqual(len(metrics["executor_available"]), len(metrics["timestamps"]))
+    self.assertEqual(len(metrics["executor_capacity"]), len(metrics["timestamps"]))
+    self.assertEqual(len(metrics["rl_window"]), len(metrics["timestamps"]))
+    self.assertIn(40.0, metrics["available_slots"])
+    self.assertIn(3.0, metrics["available_slots"])
+    self.assertIn(8.0, metrics["rl_window"])
+    self.assertIn(4.0, metrics["rl_window"])
+    self.assertEqual(metrics["latest"]["available_slots"], 3.0)
+    self.assertEqual(metrics["latest"]["executor_capacity"], 50.0)
+    self.assertAlmostEqual(metrics["latest"]["executor_available"], 0.06)
+
+  def test_live_metrics_executor_series_empty_safe(self):
+    base = 2000.0
+    audit = [
+      {"timestamp": base, "event": "agent_started"},
+      {
+        "timestamp": base + 5.0,
+        "event": "agent_tick",
+        "actual_window": 8,
+        "tcp_shadow_window": 8,
+        "mode": "active",
+      },
+    ]
+    with mock.patch.object(server, "_load_audit_events", return_value=audit), \
+         mock.patch.object(server, "fetch_builds", return_value=[]), \
+         mock.patch.object(server, "_effective_session_start",
+                           return_value=base), \
+         mock.patch.object(server, "_fetch_live_gate_state", return_value=None):
+      metrics = server.build_live_metrics()
+
+    self.assertEqual(len(metrics["available_slots"]), len(metrics["timestamps"]))
+    self.assertTrue(all(v is None for v in metrics["available_slots"]))
+    self.assertIsNone(metrics["latest"]["available_slots"])
+    self.assertGreaterEqual(len(metrics["rl_window"]), 1)
 
 
 if __name__ == "__main__":

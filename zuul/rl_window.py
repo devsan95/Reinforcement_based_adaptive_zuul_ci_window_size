@@ -45,29 +45,39 @@ ACTION_DELTAS = (-2, -1, 0, 1, 2)
 #
 # The agent observes a 6-feature vector, every feature clipped to [0, 1]:
 #
-#   idx  label             definition
-#   0    norm_window       window / ceiling
-#   1    queue_saturation  min(queue_depth / (2 * ceiling), 1) — how full the
-#                          gate queue is relative to twice the max window
-#   2    failure_rate      exponentially-decayed failure rate over the last
-#                          FAILURE_MAX_CYCLES cycles within
-#                          FAILURE_WINDOW_SECONDS (recency-weighted; a 5-min
-#                          demo is not dominated by 30-min-old outcomes)
-#   3    success_streak    consecutive successful cycles / 10, clipped
-#   4    executor_util     running builds / RL_WINDOW_EXECUTOR_CAPACITY
-#   5    queue_pressure    min(queue_depth / window, 1) — matches the 6th
-#                          feature the offline policy table was trained with
+#   idx  label                definition
+#   0    norm_window          window / ceiling
+#   1    queue_saturation     min(queue_depth / (2 * ceiling), 1) — how full
+#                             the gate queue is relative to twice the max
+#                             window
+#   2    failure_rate         exponentially-decayed failure rate over the last
+#                             FAILURE_MAX_CYCLES cycles within
+#                             FAILURE_WINDOW_SECONDS (recency-weighted; a
+#                             5-min demo is not dominated by 30-min-old
+#                             outcomes)
+#   3    success_streak       consecutive successful cycles / 10, clipped
+#   4    executor_available   READY/unused slots / capacity (available_ratio).
+#                             Replaces the dead executor_util that read
+#                             ExecutorClient.running_builds (the scheduler
+#                             client has no such field, so util was always 0).
+#                             Occupancy = 1 - executor_available.
+#   5    queue_pressure       min(queue_depth / window, 1) — matches the 6th
+#                             feature the offline policy table was trained
+#                             with
 #
 # The legacy state used hour_sin/hour_cos (time of day) at idx 3/4. Those
 # were noise for a demo and, worse, dominated the nearest-neighbour distance
 # against a table exported at fixed hour values. They are dropped; table
 # queries pin them to the grid constants with zero weight (see
-# TABLE_FEATURE_WEIGHTS / _table_query).
+# TABLE_FEATURE_WEIGHTS / _table_query). Live idx 4 (executor_available) is
+# also dropped from the table query — the exported grid's 6th dim is
+# queue/window, not nodepool occupancy. Heuristic, guardrails, and the
+# post-policy capacity clamp honour availability even when kNN ignores it.
 # ---------------------------------------------------------------------------
 STATE_SIZE = 6
 STATE_LABELS = (
     "norm_window", "queue_saturation", "failure_rate",
-    "success_streak", "executor_util", "queue_pressure",
+    "success_streak", "executor_available", "queue_pressure",
 )
 # Recency-weighted failure rate: only the last FAILURE_MAX_CYCLES outcomes
 # within FAILURE_WINDOW_SECONDS count, each decayed with FAILURE_HALF_LIFE.
@@ -85,6 +95,8 @@ ROLLING_WINDOW_SECONDS = 30 * 60
 # vary (hour slots weight 0) and emphasise the failure signal.
 # Table feature layout: [norm_w, norm_d(=queue/ceiling), fail,
 #                        hour_sin, hour_cos, util(=queue/window)].
+# Live executor_available is not in this layout (weight would be wasted);
+# availability is applied via heuristic/guards + capacity clamp.
 TABLE_FEATURE_WEIGHTS = (1.0, 1.0, 2.0, 0.0, 0.0, 1.0)
 KNN_K = int(os.environ.get("RL_KNN_K", "5"))
 # If even the best (weighted) neighbour is farther than this, the table has
@@ -102,6 +114,24 @@ DEFAULT_INITIAL_WINDOW = int(os.environ.get("RL_DEFAULT_INITIAL_WINDOW", "8"))
 # This is intentional demo behaviour, not a claim about the trained policy.
 DEMO_HOLD_FAILURE_RATE = float(
     os.environ.get("RL_DEMO_HOLD_FAILURE_RATE", "0.15"))
+# Hold / refuse growth when this fraction or fewer of slots are READY.
+EXECUTOR_HOLD_AVAILABLE = float(
+    os.environ.get("RL_EXECUTOR_HOLD_AVAILABLE", "0.2"))
+# Allow growth when at least this fraction of slots are READY (and the
+# queue is deep with low failures).
+EXECUTOR_GROW_AVAILABLE = float(
+    os.environ.get("RL_EXECUTOR_GROW_AVAILABLE", "0.35"))
+# Reuse launcher/nodepool observations for this many seconds so a burst
+# of cycle ticks does not list ZK nodes on every call.
+EXECUTOR_SNAPSHOT_TTL = float(
+    os.environ.get("RL_EXECUTOR_SNAPSHOT_TTL", "2"))
+
+# ProviderNode / Nodepool states used when counting job slots.
+_SLOT_READY = "ready"
+_SLOT_IN_USE = "in-use"
+_SLOT_HOST = "slot-host"
+_SLOT_BUILDING = "building"
+_SLOT_REQUESTED = "requested"
 
 
 def _clip01(value: float) -> float:
@@ -124,6 +154,47 @@ class QueueOverride:
     expires_at: Optional[float] = None
 
 
+@dataclass
+class ExecutorSnapshot:
+    """Live nodepool/launcher slot counts for the RL window agent."""
+
+    capacity: int
+    available: int
+    in_use: int
+    available_ratio: float
+    occupancy: float
+    source: str  # launcher | nodepool | executor_api | running_builds | env
+
+
+def _env_executor_capacity() -> int:
+    return max(1, int(os.environ.get("RL_WINDOW_EXECUTOR_CAPACITY", "4")))
+
+
+def _executor_audit_fields(snapshot: Optional[ExecutorSnapshot]) -> dict:
+    """Named nodepool fields for audit / live-metrics (full-session chart).
+
+    ``executor_available`` is the 0–1 ratio (state dim 4). Integer free
+    slots live on ``available_slots``.
+    """
+    if snapshot is None:
+        return {
+            "available_slots": None,
+            "executor_capacity": None,
+            "executor_in_use": None,
+            "executor_available": None,
+            "executor_occupancy": None,
+            "executor_source": None,
+        }
+    return {
+        "available_slots": int(snapshot.available),
+        "executor_capacity": int(snapshot.capacity),
+        "executor_in_use": int(snapshot.in_use),
+        "executor_available": float(snapshot.available_ratio),
+        "executor_occupancy": float(snapshot.occupancy),
+        "executor_source": snapshot.source,
+    }
+
+
 class WindowController:
     """Thread-safe controller for RL window overrides and metrics."""
 
@@ -142,7 +213,6 @@ class WindowController:
         self._policy_table: Optional[dict] = None
         self._policy_entries: List[dict] = []
         self._policy_kind = "heuristic"
-        self._interval = 60
         self._recommendations: Dict[str, dict] = {}
         # Parallel TCP-only window (for RL vs TCP comparison in audit).
         self._tcp_shadow: Dict[str, int] = {}
@@ -151,6 +221,8 @@ class WindowController:
         self._demo_reset_path = os.environ.get(
             "RL_DEMO_RESET_PATH", "/var/lib/zuul/rl_demo_reset.request")
         self._scheduler = None
+        self._executor_snapshot: Optional[ExecutorSnapshot] = None
+        self._executor_snapshot_at: float = 0.0
 
     def configure(self, config):
         if not config.has_section("rl_window"):
@@ -162,8 +234,6 @@ class WindowController:
             "rl_window", "pipeline", fallback="gate")
         self._mode = config.get(
             "rl_window", "mode", fallback="shadow").lower()
-        self._interval = config.getint(
-            "rl_window", "interval", fallback=60)
         self._policy_path = config.get(
             "rl_window", "policy_path",
             fallback=os.environ.get("RL_WINDOW_POLICY_PATH", ""))
@@ -216,9 +286,11 @@ class WindowController:
         The offline table was exported with features
         [norm_window, queue/ceiling, failure_rate, hour_sin, hour_cos,
         queue/window]. The live state carries [norm_window,
-        queue/(2*ceiling), failure_rate, success_streak, executor_util,
-        queue/window], so translate the shared features and pin the hour
-        slots to the grid constants (they carry zero weight anyway).
+        queue/(2*ceiling), failure_rate, success_streak,
+        executor_available, queue/window], so translate the shared
+        features and pin the hour slots to the grid constants (they
+        carry zero weight anyway). executor_available is not in the
+        table; heuristic/guards/capacity clamp apply it instead.
         """
         norm_window = float(state[0])
         queue_saturation = float(state[1])
@@ -335,17 +407,233 @@ class WindowController:
             streak += 1
         return streak
 
-    def _executor_utilisation(self, scheduler) -> float:
+    def _layout_slot_capacity(self, scheduler) -> Optional[int]:
+        """Sum static-provider slots from the managed tenant layout.
+
+        Demo providers.yaml: one static node × labels.slots (50).
+        """
         try:
-            executor = scheduler.executor
-            if executor is None:
-                return 0.0
-            running = len(getattr(executor, "running_builds", {}) or {})
-            capacity = max(
-                1, int(os.environ.get("RL_WINDOW_EXECUTOR_CAPACITY", "4")))
-            return min(1.0, running / capacity)
+            tenants = getattr(getattr(scheduler, "abide", None), "tenants", None)
+            if not isinstance(tenants, dict) and not hasattr(tenants, "get"):
+                return None
+            tenant = tenants.get(self._tenant)
+            if tenant is None:
+                return None
+            providers = getattr(getattr(tenant, "layout", None), "providers", None)
+            if isinstance(providers, dict):
+                provider_list = list(providers.values())
+            elif isinstance(providers, (list, tuple)):
+                provider_list = list(providers)
+            else:
+                return None
+            total = 0
+            found = False
+            for provider in provider_list:
+                nodes = getattr(provider, "nodes", None)
+                labels = getattr(provider, "labels", None)
+                if isinstance(nodes, dict):
+                    node_iter = nodes.values()
+                elif isinstance(nodes, (list, tuple)):
+                    node_iter = nodes
+                else:
+                    continue
+                if not isinstance(labels, dict):
+                    continue
+                for node in node_iter:
+                    label_name = getattr(node, "label", None)
+                    if label_name is None:
+                        continue
+                    label = labels.get(label_name)
+                    if label is None:
+                        continue
+                    try:
+                        slots = int(getattr(label, "slots", 1) or 1)
+                    except (TypeError, ValueError):
+                        continue
+                    total += max(slots, 1)
+                    found = True
+            return total if found else None
         except Exception:
-            return 0.0
+            return None
+
+    @staticmethod
+    def _count_launcher_slots(summaries) -> Optional[Tuple[int, int, int]]:
+        """Return (ready, in_use, building) job slots, skipping slot-hosts.
+
+        None when the listing is empty or not a real sequence (mocks).
+        """
+        if not isinstance(summaries, (list, tuple)):
+            return None
+        ready = 0
+        in_use = 0
+        building = 0
+        saw_node = False
+        for raw in summaries:
+            if not isinstance(raw, dict):
+                continue
+            saw_node = True
+            state = raw.get("state")
+            if state == _SLOT_HOST:
+                continue
+            if state == _SLOT_READY:
+                ready += 1
+            elif state == _SLOT_IN_USE:
+                in_use += 1
+            elif state in (_SLOT_BUILDING, _SLOT_REQUESTED):
+                building += 1
+        if not saw_node:
+            return None
+        return ready, in_use, building
+
+    @staticmethod
+    def _count_legacy_nodes(nodes) -> Optional[Tuple[int, int]]:
+        if isinstance(nodes, tuple) and not nodes:
+            return None
+        if isinstance(nodes, list):
+            seq = nodes
+        elif type(nodes).__name__ == "generator":
+            seq = list(nodes)
+        elif isinstance(nodes, tuple):
+            seq = list(nodes)
+        else:
+            return None
+        if not seq:
+            return None
+        ready = 0
+        in_use = 0
+        for node in seq:
+            state = getattr(node, "state", None)
+            if state == _SLOT_READY:
+                ready += 1
+            elif state == _SLOT_IN_USE:
+                in_use += 1
+        if ready == 0 and in_use == 0:
+            return None
+        return ready, in_use
+
+    def _observe_executors(self, scheduler) -> ExecutorSnapshot:
+        """Count READY vs in-use job slots from launcher / nodepool.
+
+        Observation order:
+          1. In-Zuul launcher ProviderNodes (static slot-hosts + READY
+             subnodes) — this is the demo stack.
+          2. Legacy nodepool Node cache (``/nodepool/nodes``).
+          3. Executor API running/paused build requests.
+          4. ``executor.running_builds`` if a test double provides it.
+          5. ``RL_WINDOW_EXECUTOR_CAPACITY`` with all slots treated free.
+        """
+        now = time.time()
+        cached = self._executor_snapshot
+        if (cached is not None and
+                (now - self._executor_snapshot_at) < EXECUTOR_SNAPSHOT_TTL):
+            return cached
+
+        env_cap = _env_executor_capacity()
+        layout_cap = self._layout_slot_capacity(scheduler)
+        snapshot = None
+        try:
+            snapshot = self._observe_executors_inner(
+                scheduler, env_cap, layout_cap)
+        except Exception:
+            log.debug("Executor capacity observation failed", exc_info=True)
+        if snapshot is None:
+            cap = layout_cap or env_cap
+            snapshot = ExecutorSnapshot(
+                capacity=cap, available=cap, in_use=0,
+                available_ratio=1.0, occupancy=0.0, source="env")
+        self._executor_snapshot = snapshot
+        self._executor_snapshot_at = now
+        return snapshot
+
+    def _observe_executors_inner(
+            self, scheduler, env_cap: int,
+            layout_cap: Optional[int]) -> Optional[ExecutorSnapshot]:
+        def _finish(ready, in_use, source, extra_capacity=0):
+            live = ready + in_use
+            if live <= 0:
+                return None
+            capacity = max(live, extra_capacity, layout_cap or 0, env_cap)
+            available = max(0, int(ready))
+            occupancy = _clip01(in_use / max(capacity, 1))
+            available_ratio = _clip01(available / max(capacity, 1))
+            return ExecutorSnapshot(
+                capacity=int(capacity),
+                available=available,
+                in_use=int(in_use),
+                available_ratio=available_ratio,
+                occupancy=occupancy,
+                source=source)
+
+        launcher = getattr(scheduler, "launcher", None)
+        lister = getattr(launcher, "listProviderNodeSummaries", None)
+        if callable(lister):
+            try:
+                summaries = lister()
+            except Exception:
+                summaries = None
+            counted = self._count_launcher_slots(summaries)
+            if counted is not None:
+                ready, in_use, building = counted
+                # READY/IN_USE observed: real pool. If everything is still
+                # building (demo warmup), fall through so we do not clamp
+                # the window to the floor before slots exist.
+                finished = _finish(
+                    ready, in_use, "launcher", extra_capacity=building)
+                if finished is not None:
+                    return finished
+
+        nodepool = getattr(scheduler, "nodepool", None)
+        get_nodes = getattr(nodepool, "getNodes", None)
+        if callable(get_nodes):
+            try:
+                nodes = get_nodes()
+            except Exception:
+                nodes = None
+            counted = self._count_legacy_nodes(nodes)
+            if counted is not None:
+                ready, in_use = counted
+                finished = _finish(ready, in_use, "nodepool")
+                if finished is not None:
+                    return finished
+
+        executor = getattr(scheduler, "executor", None)
+        api = getattr(executor, "executor_api", None)
+        in_state = getattr(api, "inState", None)
+        if callable(in_state):
+            try:
+                try:
+                    from zuul.model import BuildRequest
+                    reqs = in_state(BuildRequest.RUNNING, BuildRequest.PAUSED)
+                except Exception:
+                    reqs = in_state()
+            except Exception:
+                reqs = None
+            if isinstance(reqs, (list, tuple)):
+                in_use = len(reqs)
+                cap = max(layout_cap or 0, env_cap, in_use, 1)
+                available = max(0, cap - in_use)
+                return ExecutorSnapshot(
+                    capacity=cap, available=available, in_use=in_use,
+                    available_ratio=_clip01(available / cap),
+                    occupancy=_clip01(in_use / cap),
+                    source="executor_api")
+
+        running = getattr(executor, "running_builds", None)
+        if isinstance(running, dict):
+            in_use = len(running)
+        elif isinstance(running, (list, tuple)):
+            in_use = len(running)
+        else:
+            in_use = None
+        if in_use is not None:
+            cap = max(layout_cap or 0, env_cap, in_use, 1)
+            available = max(0, cap - in_use)
+            return ExecutorSnapshot(
+                capacity=cap, available=available, in_use=in_use,
+                available_ratio=_clip01(available / cap),
+                occupancy=_clip01(in_use / cap),
+                source="running_builds")
+        return None
 
     def get_rl_state(self, scheduler, change_queue) -> List[float]:
         """Return six normalised state features, each clipped to [0, 1].
@@ -370,14 +658,15 @@ class WindowController:
             streak = self._success_streak(metrics)
         success_streak = _clip01(streak / SUCCESS_STREAK_NORM)
 
-        util = _clip01(self._executor_utilisation(scheduler))
+        snapshot = self._observe_executors(scheduler)
+        available_ratio = _clip01(snapshot.available_ratio)
 
         return [
             norm_window,
             queue_saturation,
             failure_rate,
             success_streak,
-            util,
+            available_ratio,
             queue_pressure,
         ]
 
@@ -389,16 +678,63 @@ class WindowController:
         ceiling = int(ceiling)
         return max(floor, min(ceiling, int(size)))
 
+    def _clamp_to_available(self, change_queue, size: int) -> int:
+        """Cap the window at free slots, never below the pipeline floor.
+
+        ``recommended_window = min(policy_window, max(floor, available))``.
+        """
+        floor = int(change_queue.window_floor or 1)
+        snapshot = self._executor_snapshot
+        if snapshot is None or snapshot.source == "env":
+            return self._clamp_window(change_queue, size)
+        cap = max(floor, int(snapshot.available))
+        return self._clamp_window(change_queue, min(int(size), cap))
+
     def _enforce_rl_tcp_floor(self, change_queue, size: int, *,
                               queue_key: Optional[str] = None,
-                              audit_source: Optional[str] = None) -> Tuple[int, int]:
-        """Ensure RL window is never below the TCP shadow (then clamp to bounds)."""
+                              audit_source: Optional[str] = None,
+                              apply_capacity: Optional[bool] = None,
+                              enforce_tcp_floor: bool = True) -> Tuple[int, int]:
+        """Clamp a requested window to pipeline bounds (and, optionally,
+        floor it at the TCP shadow window).
+
+        ``enforce_tcp_floor=True`` (default) preserves the historical
+        demo/heuristic/kNN-table behaviour of never letting the applied
+        window fall below the hypothetical TCP-only window. Pure PPO
+        decisions (meta["source"] == "ppo") pass ``enforce_tcp_floor=
+        False`` so the network's own action is what gets applied — the
+        agent must be free to choose a window *smaller* than TCP would,
+        or RQ2's comparison is no longer measuring the learned policy.
+
+        Capacity clamp can still win when free slots are below the TCP
+        shadow: applied ≤ max(floor, available) but never below floor.
+        """
         key = queue_key or self._queue_key(change_queue)
         tcp_shadow = self._ensure_tcp_shadow(change_queue)
         requested = int(size)
         requested_clamped = self._clamp_window(change_queue, requested)
-        enforced = self._clamp_window(
-            change_queue, max(requested, tcp_shadow))
+        if enforce_tcp_floor:
+            enforced = self._clamp_window(
+                change_queue, max(requested, tcp_shadow))
+        else:
+            enforced = requested_clamped
+        if apply_capacity is None:
+            apply_capacity = (audit_source == "agent")
+        if apply_capacity:
+            capped = self._clamp_to_available(change_queue, enforced)
+            if capped != enforced:
+                self._audit(key, {
+                    "event": "executor_capacity_clamp",
+                    "requested_window": requested,
+                    "tcp_shadow_window": tcp_shadow,
+                    "before_capacity_clamp": enforced,
+                    "enforced_window": capped,
+                    "available_slots": (
+                        self._executor_snapshot.available
+                        if self._executor_snapshot else None),
+                    "source": audit_source,
+                })
+                enforced = capped
         if enforced > requested_clamped and audit_source:
             self._audit(key, {
                 "event": "rl_floor_applied",
@@ -412,11 +748,18 @@ class WindowController:
     def set_window_from_api(self, change_queue, size: int,
                             source: str = "api",
                             persist_seconds: Optional[int] = None,
-                            context=None):
-        """Apply a bounded persistent window override."""
+                            context=None,
+                            enforce_tcp_floor: bool = True):
+        """Apply a bounded persistent window override.
+
+        ``enforce_tcp_floor=False`` is used for pure-PPO agent decisions
+        (see _enforce_rl_tcp_floor) so the network's chosen window is
+        applied as-is, not floored at the TCP shadow window.
+        """
         key = self._queue_key(change_queue)
         clamped, _ = self._enforce_rl_tcp_floor(
-            change_queue, size, queue_key=key, audit_source=source)
+            change_queue, size, queue_key=key, audit_source=source,
+            enforce_tcp_floor=enforce_tcp_floor)
         expires_at = None
         if persist_seconds is not None:
             expires_at = time.time() + persist_seconds
@@ -425,19 +768,33 @@ class WindowController:
             set_at=time.time(), expires_at=expires_at)
         with self._lock:
             self._overrides[key] = override
-        ctx = context or change_queue.zk_context
-        if ctx is None:
-            raise RuntimeError(
-                "No ZK context available for window override")
-        with change_queue.activeContext(ctx):
-            change_queue.window = clamped
+        # Skip the ZK write entirely when the window isn't actually
+        # changing (e.g. every "hold" decision). Every entry into
+        # activeContext is a real write to this ChangeQueue object,
+        # contending with the core scheduler's own writes to the same
+        # znode on every real gate event; writing the same value back
+        # on every ~10s tick regardless of whether anything changed was
+        # pure unforced contention. Observed live: a scheduler-side
+        # "Exception saving ZKObject <ChangeQueue gate: ...>"
+        # (BadVersionError) followed by the gate pipeline silently
+        # stopping all further processing — jobs kept finishing but were
+        # never reported or merged. Cutting out no-op writes reduces how
+        # often the agent's tick and the scheduler's own save can land
+        # on the same object at the same moment.
+        if int(change_queue.window or 0) != clamped:
+            ctx = context or change_queue.zk_context
+            if ctx is None:
+                raise RuntimeError(
+                    "No ZK context available for window override")
+            with change_queue.activeContext(ctx):
+                change_queue.window = clamped
+            log.info("RL window override for %s set to %s (%s)",
+                     key, clamped, source)
         self._audit(key, {
             "event": "set_window",
             "size": clamped,
             "source": source,
         })
-        log.info("RL window override for %s set to %s (%s)",
-                 key, clamped, source)
         return clamped
 
     def clear_override(self, change_queue):
@@ -584,6 +941,8 @@ class WindowController:
             self._metrics.clear()
             self._session_baseline_set = False
             self._pending_demo_baseline = False
+            self._executor_snapshot = None
+            self._executor_snapshot_at = 0.0
         self._truncate_audit_log()
         purged = self._purge_all_pipeline_queues(scheduler)
         baseline_ok = self._reset_session_baseline(scheduler)
@@ -637,22 +996,36 @@ class WindowController:
         try:
             self._ensure_tcp_shadow(change_queue)
             state = self.get_rl_state(scheduler, change_queue)
-            action_idx, decision_reason, decision_meta = \
-                self._choose_action(state)
+            snapshot = self._executor_snapshot
             actual_window = int(
                 change_queue.window or change_queue.window_floor)
+            action_idx, decision_reason, decision_meta = \
+                self._choose_action(
+                    state, snapshot=snapshot,
+                    current_window=actual_window)
             recommended = self._apply_action(
-                change_queue, action_idx, apply=apply_override)
+                change_queue, action_idx, apply=apply_override,
+                decision_source=decision_meta.get("source"))
             if self._mode == "shadow":
                 self.clear_override(change_queue)
             if apply_override:
                 actual_window = int(
                     change_queue.window or change_queue.window_floor)
             tcp_shadow = self._tcp_shadow.get(key, actual_window)
-            if actual_window > tcp_shadow:
+            if (snapshot is not None and snapshot.source != "env" and
+                    "executor" not in decision_reason.lower() and
+                    snapshot.available < actual_window):
+                decision_reason += (
+                    f" — only {snapshot.available} executors free")
+            if actual_window != tcp_shadow:
+                # Always show the real comparison, ahead or behind — this
+                # is the factual "RL vs TCP" figure, not a guess about
+                # what TCP hypothetically "would have" done.
+                gap = actual_window - tcp_shadow
+                sign = "+" if gap > 0 else ""
                 decision_reason += (
                     f" · RL {actual_window} vs TCP {tcp_shadow}"
-                    f" (+{actual_window - tcp_shadow})")
+                    f" ({sign}{gap})")
             self._record_recommendation(
                 change_queue, recommended, action_idx,
                 actual_window=actual_window,
@@ -676,6 +1049,7 @@ class WindowController:
                 "decision_confidence": decision_meta.get("confidence"),
                 "knn_distance": decision_meta.get("knn_distance"),
                 "guardrail": decision_meta.get("guardrail"),
+                **_executor_audit_fields(snapshot),
                 "mode": self._mode,
                 "policy": self._policy_kind,
                 "cycle_triggered": True,
@@ -755,7 +1129,8 @@ class WindowController:
             action_idx: int,
             state: List[float],
             *,
-            kind: str = "policy") -> str:
+            kind: str = "policy",
+            snapshot: Optional[ExecutorSnapshot] = None) -> str:
         """Plain-English primary UI reason for a window action.
 
         Keep this short and non-technical. Lookup detail (kNN distance,
@@ -769,32 +1144,70 @@ class WindowController:
         streak_n = int(success_streak * SUCCESS_STREAK_NORM)
         quiet = failure_rate < 0.1 and queue_saturation < 0.4
         step = abs(delta)
+        free_n = int(snapshot.available) if snapshot is not None else None
+        if free_n is None and len(state) > 4:
+            # Approximate from the state ratio when no live snapshot.
+            free_n = int(round(float(state[4]) * _env_executor_capacity()))
 
+        if kind == "low_executors":
+            n = 0 if free_n is None else free_n
+            if delta < 0:
+                return (
+                    f"Reduced the window by {step} — only {n} "
+                    f"executors free.")
+            return f"Held the window — only {n} executors free."
+        if kind == "executors_free":
+            n = 0 if free_n is None else free_n
+            return (
+                f"Increased the window by {step} — {n} executors free "
+                f"and the queue is deep.")
         if kind == "hold_burst":
+            extra = ""
+            if free_n is not None and free_n <= 4:
+                extra = f" Only {free_n} executors free."
             return (
                 f"Held the window — holding through failures "
                 f"({fr_pct}% rate). TCP would have cut capacity; "
-                f"RL keeps it steady.")
+                f"RL keeps it steady.{extra}")
         if kind == "ramp_streak":
             return (
                 f"Increased the window by {step} after {streak_n} "
                 f"consecutive successes (faster than TCP's +1).")
         if delta < 0:
+            # step is 1 or 2 (ACTION_DELTAS max magnitude); label the
+            # size honestly rather than always calling it "gentle" — a
+            # full -2 step at a high failure rate is the agent's
+            # strongest shrink action, not a small trim. The real
+            # comparison against TCP's actual current window (not a
+            # guess about what TCP "would" do) is appended separately in
+            # _tick_queue_agent, since TCP's rule reacts to whether the
+            # single last cycle failed, which this rolling failure_rate
+            # feature does not directly tell us — claiming "TCP would
+            # have halved" here was not reliably true.
+            size_word = "small trim" if step == 1 else "sharp cut"
             if quiet:
                 return (
-                    f"Reduced the window by {step} (gentle trim). "
-                    f"Failures are low; TCP would have halved instead.")
+                    f"Reduced the window by {step} ({size_word}), even "
+                    f"though failures are currently low.")
             return (
-                f"Reduced the window by {step} (gentle trim). "
-                f"Failure rate {fr_pct}%; TCP would have halved instead.")
+                f"Reduced the window by {step} ({size_word}) — "
+                f"failure rate {fr_pct}%.")
         if delta > 0:
             if quiet or failure_rate < 0.1:
                 return (
                     f"Increased the window by {step}. "
                     f"Queue is quiet and failures are low.")
+            if failure_rate < 0.4:
+                return (
+                    f"Increased the window by {step}. "
+                    f"Failure rate {fr_pct}% is manageable so far.")
+            # Above 40% failure, growing is a real bet the policy is
+            # making, not a safe default — say so plainly instead of
+            # reassuring the viewer the same way regardless of severity.
             return (
-                f"Increased the window by {step}. "
-                f"Failure rate {fr_pct}% is still workable.")
+                f"Increased the window by {step} despite a {fr_pct}% "
+                f"failure rate — the policy is betting this still beats "
+                f"TCP's slower reaction; watch this one.")
         if quiet:
             return (
                 f"Held the window — queue quiet, failures low "
@@ -803,66 +1216,177 @@ class WindowController:
             f"Held the window — failure rate {fr_pct}%, "
             f"queue {queue_saturation:.0%} saturated.")
 
-    def _heuristic_action(self, state: List[float]) -> Tuple[int, str]:
+    @staticmethod
+    def _executor_scarce(state: List[float],
+                         snapshot: Optional[ExecutorSnapshot],
+                         current_window: Optional[int]) -> bool:
+        ratio = float(state[4]) if len(state) > 4 else 1.0
+        if ratio <= EXECUTOR_HOLD_AVAILABLE:
+            return True
+        if snapshot is not None:
+            if snapshot.available <= 0:
+                return True
+            if (current_window is not None and
+                    snapshot.available < int(current_window)):
+                return True
+        return False
+
+    @staticmethod
+    def _executor_plentiful(state: List[float],
+                            snapshot: Optional[ExecutorSnapshot],
+                            current_window: Optional[int]) -> bool:
+        ratio = float(state[4]) if len(state) > 4 else 0.0
+        if ratio < EXECUTOR_GROW_AVAILABLE:
+            return False
+        if snapshot is not None and current_window is not None:
+            if snapshot.available <= int(current_window):
+                return False
+        return True
+
+    def _heuristic_action(self, state: List[float], *,
+                          snapshot: Optional[ExecutorSnapshot] = None,
+                          current_window: Optional[int] = None
+                          ) -> Tuple[int, str]:
         """Rule-based fallback when no policy applies (low kNN confidence,
         no table loaded, or PPO unavailable)."""
         failure_rate = state[2] if len(state) > 2 else 0.0
         queue_saturation = state[1] if len(state) > 1 else 0.0
         success_streak = state[3] if len(state) > 3 else 0.0
+        queue_pressure = state[5] if len(state) > 5 else 0.0
+        available_ratio = state[4] if len(state) > 4 else 1.0
+        scarce = self._executor_scarce(state, snapshot, current_window)
+        plentiful = self._executor_plentiful(
+            state, snapshot, current_window)
+
+        if scarce:
+            # Extreme occupancy and a non-tiny window → trim; otherwise hold.
+            if available_ratio < 0.08 and (state[0] if state else 0.0) > 0.2:
+                return 1, self._format_decision_reason(
+                    1, state, kind="low_executors", snapshot=snapshot)
+            return 2, self._format_decision_reason(
+                2, state, kind="low_executors", snapshot=snapshot)
         if failure_rate > DEMO_HOLD_FAILURE_RATE:
             return 2, self._format_decision_reason(
-                2, state, kind="hold_burst")
+                2, state, kind="hold_burst", snapshot=snapshot)
         if success_streak >= 0.3:
             return 4, self._format_decision_reason(
-                4, state, kind="ramp_streak")
+                4, state, kind="ramp_streak", snapshot=snapshot)
+        queue_deep = queue_pressure >= 0.5 or queue_saturation >= 0.3
+        if plentiful and failure_rate < 0.1 and queue_deep:
+            action = 4 if (available_ratio >= 0.6 and
+                           queue_pressure >= 0.8) else 3
+            return action, self._format_decision_reason(
+                action, state, kind="executors_free", snapshot=snapshot)
         if failure_rate < 0.1 and queue_saturation < 0.4:
-            return 3, self._format_decision_reason(3, state)
-        return 2, self._format_decision_reason(2, state)
+            return 3, self._format_decision_reason(
+                3, state, snapshot=snapshot)
+        return 2, self._format_decision_reason(
+            2, state, snapshot=snapshot)
 
-    def _choose_action(self, state: List[float]) -> Tuple[int, str, dict]:
+    def _choose_action(self, state: List[float], *,
+                       snapshot: Optional[ExecutorSnapshot] = None,
+                       current_window: Optional[int] = None
+                       ) -> Tuple[int, str, dict]:
         """Pick a window action, explain it, and report the source.
 
         Decision pipeline:
-          1. Policy: table exact match → weighted kNN vote (k=KNN_K over
-             the exported grid, per-feature weights, hour slots weight 0)
-             → PPO network → heuristic. kNN falls back to the heuristic
-             when the nearest neighbour is farther than KNN_MAX_DISTANCE
-             (state out of the table's training distribution).
-          2. Guardrails (applied on top of any policy choice):
+          1. Pure PPO: when a trained Stable-Baselines3 PPO network is
+             loaded (``self._policy``), its ``predict()`` output IS the
+             action — no guardrails, no kNN table, no TCP-shadow floor.
+             This is required for RQ2 (research proposal Section 3.2.3 /
+             thesis Section 3.2.3): the statistical comparison against
+             the TCP rule and the other baselines must evaluate the
+             learned policy on its own merits, not a policy blended with
+             hand-tuned demo rules. Only the physical bounds clamp
+             (window_floor/window_ceiling, applied later in
+             set_window_from_api) and, optionally, the executor-capacity
+             clamp — a hard resource constraint, not a heuristic — still
+             apply after this method returns.
+          2. Policy table (used only when no PPO network is loaded, e.g.
+             the lightweight offline-search table for a dependency-free
+             demo): table exact match → weighted kNN vote (k=KNN_K over
+             the exported grid, per-feature weights, hour slots weight
+             0). kNN falls back to the heuristic when the nearest
+             neighbour is farther than KNN_MAX_DISTANCE (state out of
+             the table's training distribution). This coarse
+             approximation is still guarded (see _guarded below), since
+             it is not the trained network.
+          3. Heuristic fallback (no policy loaded at all), also guarded.
+
+        Guardrails (table/heuristic paths only):
+             - hold instead of growing when few executors are free;
              - hold instead of shrinking while the recency-weighted
                failure rate exceeds DEMO_HOLD_FAILURE_RATE (a failure
                burst must not halve throughput — TCP's mistake);
              - shrinks bounded to −2 per tick by ACTION_DELTAS;
-             - upgrade a hold to +2 after a sustained success streak;
-             - later the applied window is floored at the TCP shadow and
-               clamped to the pipeline floor/ceiling.
+             - upgrade a hold to +2 after a sustained success streak
+               only when executors are plentiful;
+             - later the applied window is floored at the TCP shadow,
+               clamped to the pipeline floor/ceiling, then capped at
+               available slots.
 
         Returns (action_idx, human-readable reason, meta) where meta has
-        "source" (table-exact | knn | ppo | heuristic), "confidence"
+        "source" (ppo | table-exact | knn | heuristic), "confidence"
         (0..1, from kNN distance when applicable), and optional
         "policy_detail" for tooltips/debug (kNN distance, table match, …).
         """
+        if snapshot is None:
+            snapshot = self._executor_snapshot
+
+        if self._policy is not None and np is not None:
+            obs = np.array(state, dtype=np.float32)
+            action, _ = self._policy.predict(obs, deterministic=True)
+            action_idx = int(action)
+            return action_idx, self._format_decision_reason(
+                action_idx, state, snapshot=snapshot), {
+                "source": "ppo",
+                "confidence": None,
+                "knn_distance": None,
+                "policy_detail": "Decided by the trained PPO model "
+                                  "itself — no override rules or manual "
+                                  "safety floor involved.",
+            }
+
         failure_rate = state[2] if len(state) > 2 else 0.0
         success_streak = state[3] if len(state) > 3 else 0.0
+        scarce = self._executor_scarce(state, snapshot, current_window)
+        plentiful = self._executor_plentiful(
+            state, snapshot, current_window)
 
         def _guarded(action: int, meta: dict) -> Tuple[int, str, dict]:
             delta = ACTION_DELTAS[action]
+            if delta > 0 and scarce:
+                meta = dict(meta, guardrail="hold_on_low_executors")
+                return 2, self._format_decision_reason(
+                    2, state, kind="low_executors",
+                    snapshot=snapshot), meta
             if failure_rate > DEMO_HOLD_FAILURE_RATE and delta < 0:
                 meta = dict(meta, guardrail="hold_on_failure_burst")
                 return 2, self._format_decision_reason(
-                    2, state, kind="hold_burst"), meta
-            if delta == 0 and failure_rate < 0.05 and success_streak >= 0.5:
-                meta = dict(meta, guardrail="ramp_on_success_streak")
-                return 4, self._format_decision_reason(
-                    4, state, kind="ramp_streak"), meta
-            return action, self._format_decision_reason(action, state), meta
+                    2, state, kind="hold_burst",
+                    snapshot=snapshot), meta
+            if (delta == 0 and failure_rate < 0.05 and
+                    success_streak >= 0.5):
+                if scarce:
+                    meta = dict(meta, guardrail="hold_on_low_executors")
+                    return 2, self._format_decision_reason(
+                        2, state, kind="low_executors",
+                        snapshot=snapshot), meta
+                if plentiful:
+                    meta = dict(meta, guardrail="ramp_on_success_streak")
+                    return 4, self._format_decision_reason(
+                        4, state, kind="ramp_streak",
+                        snapshot=snapshot), meta
+            return action, self._format_decision_reason(
+                action, state, snapshot=snapshot), meta
 
         if self._policy_table is not None or self._policy_entries:
             action, distance, detail = self._lookup_table_action(state)
             if action is not None:
                 confidence = _clip01(1.0 - distance / max(
                     KNN_MAX_DISTANCE, 1e-6))
-                source = ("table-exact" if distance == 0.0 else "knn")
+                source = ("table-exact" if detail == "table exact match"
+                          else "knn")
                 return _guarded(action, {
                     "source": source,
                     "confidence": round(confidence, 3),
@@ -871,7 +1395,8 @@ class WindowController:
                 })
             # Low confidence: fall through to heuristic; keep lookup detail
             # in meta for debug, not in the primary reason string.
-            h_action, h_reason = self._heuristic_action(state)
+            h_action, h_reason = self._heuristic_action(
+                state, snapshot=snapshot, current_window=current_window)
             return h_action, h_reason, {
                 "source": "heuristic",
                 "confidence": 0.0,
@@ -879,16 +1404,8 @@ class WindowController:
                                  if math.isfinite(distance) else None),
                 "policy_detail": detail,
             }
-        if self._policy is not None and np is not None:
-            obs = np.array(state, dtype=np.float32)
-            action, _ = self._policy.predict(obs, deterministic=True)
-            return _guarded(int(action), {
-                "source": "ppo",
-                "confidence": None,
-                "knn_distance": None,
-                "policy_detail": "PPO policy",
-            })
-        h_action, h_reason = self._heuristic_action(state)
+        h_action, h_reason = self._heuristic_action(
+            state, snapshot=snapshot, current_window=current_window)
         return h_action, h_reason, {
             "source": "heuristic",
             "confidence": None,
@@ -900,41 +1417,21 @@ class WindowController:
         delta = ACTION_DELTAS[action_idx]
         return (change_queue.window or change_queue.window_floor) + delta
 
-    def _apply_action(self, change_queue, action_idx: int, apply: bool = True):
+    def _apply_action(self, change_queue, action_idx: int, apply: bool = True,
+                      decision_source: Optional[str] = None):
         new_size = self._recommend_window(change_queue, action_idx)
+        # Pure PPO decisions are applied as-is (see _choose_action /
+        # _enforce_rl_tcp_floor) — only table/heuristic decisions get the
+        # "never below TCP shadow" demo floor.
+        enforce_tcp_floor = decision_source != "ppo"
         if apply:
             return self.set_window_from_api(
-                change_queue, new_size, source="agent")
+                change_queue, new_size, source="agent",
+                enforce_tcp_floor=enforce_tcp_floor)
         enforced, _ = self._enforce_rl_tcp_floor(
-            change_queue, new_size, audit_source="agent")
+            change_queue, new_size, audit_source="agent",
+            enforce_tcp_floor=enforce_tcp_floor)
         return enforced
-
-    def run_agent_tick(self, scheduler):
-        if not self._enabled:
-            return
-        if self._check_demo_reset_request(scheduler):
-            return
-        if not self._session_baseline_set:
-            if self._reset_session_baseline(scheduler):
-                self._session_baseline_set = True
-                return
-        tenant = scheduler.abide.tenants.get(self._tenant)
-        if tenant is None:
-            return
-        pipeline_manager = tenant.layout.pipeline_managers.get(
-            self._pipeline)
-        if pipeline_manager is None:
-            return
-        with scheduler.createZKContext(None, log) as ctx:
-            with pipeline_manager.currentContext(ctx):
-                for change_queue in pipeline_manager.state.queues:
-                    self._tick_queue_agent(scheduler, change_queue)
-                try:
-                    pipeline_manager.summary.update(ctx, scheduler.globals)
-                except Exception:
-                    log.debug(
-                        "Unable to refresh pipeline summary for RL status",
-                        exc_info=True)
 
     def _sync_tcp_shadow_recommendation(self, change_queue, tcp_window: int):
         """Keep status API tcp_shadow_window fresh between agent ticks."""
@@ -959,6 +1456,8 @@ class WindowController:
                 change_queue.window or change_queue.window_floor)
         if tcp_shadow_window is None:
             tcp_shadow_window = self._tcp_shadow.get(key, actual_window)
+        snap = self._executor_snapshot
+        exec_fields = _executor_audit_fields(snap)
         with self._lock:
             self._recommendations[key] = {
                 "queue_uuid": change_queue.uuid,
@@ -972,6 +1471,10 @@ class WindowController:
                 "decision_detail": decision_detail or "",
                 "mode": self._mode,
                 "updated_at": time.time(),
+                "available_slots": exec_fields["available_slots"],
+                "executor_capacity": exec_fields["executor_capacity"],
+                "executor_in_use": exec_fields["executor_in_use"],
+                "executor_available": exec_fields["executor_available"],
             }
 
     def _is_managed_pipeline(self, tenant_name: str,
@@ -1014,7 +1517,7 @@ class WindowController:
         return {
             "enabled": True,
             "mode": self._mode,
-            "interval": self._interval,
+            "tick_mode": "cycle_driven",
             "policy": self._policy_kind,
             "queues": [
                 {
@@ -1027,6 +1530,10 @@ class WindowController:
                     "decision_reason": q.get("decision_reason", ""),
                     "decision_source": q.get("decision_source", ""),
                     "decision_detail": q.get("decision_detail", ""),
+                    "available_slots": q.get("available_slots"),
+                    "executor_capacity": q.get("executor_capacity"),
+                    "executor_in_use": q.get("executor_in_use"),
+                    "executor_available": q.get("executor_available"),
                     "updated_at": int(q["updated_at"] * 1000),
                 }
                 for q in queues
@@ -1047,9 +1554,25 @@ class WindowController:
             log.debug("Unable to write RL audit record", exc_info=True)
 
     def _truncate_audit_log(self):
-        """Start a fresh audit log for a new demo session."""
+        """Start a fresh audit log for a new demo session.
+
+        The live file is reset (not appended to) so the demo dashboard only
+        ever shows the current session's trace. Previous sessions are not
+        discarded: the outgoing file is archived alongside it first, so
+        multi-session analysis (e.g. comparing several chained demo runs)
+        remains possible from disk.
+        """
         try:
             os.makedirs(os.path.dirname(self._audit_path), exist_ok=True)
+            if os.path.isfile(self._audit_path) and os.path.getsize(self._audit_path) > 0:
+                archive_path = "%s.session-%d" % (
+                    self._audit_path, int(time.time()))
+                try:
+                    os.replace(self._audit_path, archive_path)
+                except OSError:
+                    log.debug(
+                        "Unable to archive previous RL audit log at %s",
+                        self._audit_path, exc_info=True)
             with open(self._audit_path, "w", encoding="utf-8"):
                 pass
             self._audit("_scheduler", {
@@ -1120,6 +1643,7 @@ class WindowController:
                         "mode": self._mode,
                         "policy": self._policy_kind,
                         "baseline": True,
+                        **_executor_audit_fields(self._executor_snapshot),
                     })
                     self._record_recommendation(
                         change_queue, baseline, 2,
@@ -1151,14 +1675,10 @@ class WindowController:
             max_instances=1,
             next_run_time=datetime.now(),
         )
-        scheduler.apsched.add_job(
-            lambda: self.run_agent_tick(scheduler),
-            trigger=IntervalTrigger(seconds=self._interval),
-            id="rl_window_agent",
-            replace_existing=True,
-            max_instances=1,
-            next_run_time=datetime.now(),
-        )
+        # No independent periodic decision tick: RL and TCP now both only
+        # re-evaluate on a genuine gate-cycle completion (see
+        # adjust_window_after_cycle), so the two are compared on the same
+        # event cadence instead of RL updating far more often than TCP.
         log.info(
             "RL window agent started (tenant=%s pipeline=%s mode=%s)",
             self._tenant, self._pipeline, self._mode)

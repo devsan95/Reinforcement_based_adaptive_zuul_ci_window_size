@@ -1,10 +1,22 @@
 # Gate job: deterministic failures for presentable RL vs TCP demos.
 #
 # Fail rule (demo_batch, default), in priority order:
-#   1. Stamped demo-meta.json "should_fail" (authoritative — supports
-#      adaptive/variable batch sizes with a deterministic fail ratio).
-#   2. Stamped batch_index < RESEARCH_FAIL_PER_BATCH (legacy stamps).
+#   1. Stamped "Demo-Should-Fail:" trailer in this change's own commit
+#      message (authoritative — supports adaptive/variable batch sizes
+#      with a deterministic fail ratio).
+#   2. Stamped "Demo-Batch-Index:" trailer < RESEARCH_FAIL_PER_BATCH
+#      (legacy stamps).
 #   3. change % 10 < RESEARCH_FAIL_PER_BATCH (no stamp at all).
+#
+# Metadata travels in the commit message, not a workspace file. An
+# earlier revision stamped a shared demo-meta.json file instead; since
+# every synthetic change in a batch is cloned from the same master HEAD
+# (research/traffic/generator.py), each one produced a different diff to
+# that same file, and Zuul's speculative gate merge would genuinely fail
+# ("Unable to merge") whenever two such changes were stacked — well
+# before this script ever ran. Commit messages are per-commit and never
+# conflict when trees are merged, so reading the trailers below instead
+# removes that failure mode entirely.
 #
 # Legacy demo7: fail when change % 7 in {0,1,2} → exactly 3/7.
 - hosts: all
@@ -16,9 +28,10 @@
         sleep "${RESEARCH_GATE_SLEEP_SEC:-1}"
         python3 - <<'PY'
         import hashlib
-        import json
         import os
         import random
+        import re
+        import subprocess
         import sys
         from pathlib import Path
 
@@ -33,22 +46,39 @@
             "1", "true", "yes",
         )
 
+        TRAILER_RE = re.compile(r'^Demo-([A-Za-z-]+):\s*(.*)$')
+
         def load_batch_meta():
-            """Read stamped demo-meta.json from the change workspace."""
-            candidates = [
-                Path("demo-meta.json"),
-                Path("../demo-meta.json"),
-            ]
-            # Zuul checkout may nest under src/ or project dirs.
-            for p in Path(".").rglob("demo-meta.json"):
-                candidates.append(p)
-                break
-            for path in candidates:
+            """Parse Demo-* trailers from this change's own commit message.
+
+            Reads via `git log -1 --format=%B`, not a workspace file: a
+            file every change in a batch stamps differently would give
+            Zuul's speculative gate merge a genuine conflict to fail on
+            (see the module header comment) before this script ever ran.
+            Commit messages are per-commit and merge cleanly regardless.
+            """
+            search_dirs = [Path(".")]
+            search_dirs.extend(p.parent for p in Path(".").rglob(".git"))
+            for d in search_dirs:
                 try:
-                    if path.is_file():
-                        return json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
+                    out = subprocess.run(
+                        ["git", "log", "-1", "--format=%B"],
+                        cwd=str(d), capture_output=True, text=True,
+                        timeout=10, check=True).stdout
+                except (OSError, subprocess.SubprocessError):
                     continue
+                meta = {}
+                for line in out.splitlines():
+                    m = TRAILER_RE.match(line.strip())
+                    if not m:
+                        continue
+                    key = m.group(1).lower().replace("-", "_")
+                    meta[key] = m.group(2).strip()
+                if "should_fail" in meta:
+                    meta["should_fail"] = meta["should_fail"] in (
+                        "1", "true", "True")
+                if meta:
+                    return meta
             return None
 
         def batch_should_fail(batch_index, n_fail):

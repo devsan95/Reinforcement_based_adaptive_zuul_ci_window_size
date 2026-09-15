@@ -1,0 +1,4 @@
+{"timestamp": 1782844684.5366483, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active", "baseline_window": 20}
+{"timestamp": 1782844684.550171, "queue": "_scheduler", "event": "demo_queue_purged", "removed": 0, "pipelines": "all"}
+{"timestamp": 1782844684.5510185, "queue": "_scheduler", "event": "demo_session_reset", "purged": 0, "baseline_ok": false, "baseline_window": 20}
+{"timestamp": 1782845131.0406117, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active", "baseline_window": 20}

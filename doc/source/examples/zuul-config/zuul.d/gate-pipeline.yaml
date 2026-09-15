@@ -30,7 +30,7 @@
     # while RL holds ~8, and min(queue, window) differentiates right away.
     window: 8
     window-floor: 2
-    window-ceiling: 50
+    window-ceiling: 25
     window-increase-type: linear
     window-increase-factor: 1
     window-decrease-type: exponential

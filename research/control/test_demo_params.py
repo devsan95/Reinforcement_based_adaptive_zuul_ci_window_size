@@ -19,10 +19,13 @@ from server import (  # noqa: E402
     DEMO_MAX_TOTAL_CHANGES,
     default_demo_targets,
     downsample_keep_span,
+    fail_budget_met,
+    fail_stamps_needed,
     fails_for_batch,
     fails_for_duration_batch,
     job_runs_saved_est,
     parse_run_demo_params,
+    traffic_loop_should_continue,
 )
 
 
@@ -173,6 +176,106 @@ class FailsForBatchTests(unittest.TestCase):
             remaining_fails -= n
             remaining_changes -= size
         self.assertEqual(stamped, 20)
+
+
+class FailStampsNeededTests(unittest.TestCase):
+    def test_none_target_needs_zero(self):
+        self.assertEqual(fail_stamps_needed(None, 0, 0), 0)
+
+    def test_does_not_overstamp_while_inflight(self):
+        # Target 10, 7 observed, 10 stamped → wait, don't stamp more.
+        self.assertEqual(fail_stamps_needed(10, 7, 10, compensate=False), 0)
+
+    def test_compensate_replaces_lost_stamps(self):
+        # After wait, 7 of 10 stamps landed → submit 3 more.
+        self.assertEqual(fail_stamps_needed(10, 7, 10, compensate=True), 3)
+
+    def test_stamps_up_to_target_when_short(self):
+        # 4 stamped, 3 observed, target 10 → 6 more (10 - 4).
+        self.assertEqual(fail_stamps_needed(10, 3, 4, compensate=False), 6)
+
+    def test_met_needs_zero(self):
+        self.assertEqual(fail_stamps_needed(10, 10, 10), 0)
+        self.assertEqual(fail_stamps_needed(10, 12, 10), 0)
+
+    def test_budget_met(self):
+        self.assertTrue(fail_budget_met(None, 0))
+        self.assertTrue(fail_budget_met(0, 0))
+        self.assertFalse(fail_budget_met(10, 7))
+        self.assertTrue(fail_budget_met(10, 10))
+        self.assertTrue(fail_budget_met(10, 11))
+
+
+class TrafficLoopContinueTests(unittest.TestCase):
+    def _kwargs(self, **overrides):
+        base = dict(
+            stop=False,
+            target_total=100,
+            target_fails=10,
+            submitted=100,
+            observed=7,
+            now=50.0,
+            deadline=300.0,
+            catch_up_rounds=0,
+            max_catch_up=12,
+            extend_pending=0,
+        )
+        base.update(overrides)
+        return base
+
+    def test_change_cap_does_not_stop_with_fail_shortfall(self):
+        cont, reason = traffic_loop_should_continue(**self._kwargs())
+        self.assertTrue(cont)
+        self.assertEqual(reason, "fail_catch_up")
+
+    def test_stops_when_observed_hits_n_at_change_cap(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(observed=10))
+        self.assertFalse(cont)
+        self.assertEqual(reason, "fail_budget_met")
+
+    def test_deadline_keeps_catchup_while_short(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(submitted=40, now=400.0, deadline=300.0))
+        self.assertTrue(cont)
+        self.assertEqual(reason, "fail_catch_up_deadline")
+
+    def test_deadline_stops_when_budget_met(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(
+                submitted=40, observed=10, now=400.0, deadline=300.0))
+        self.assertFalse(cont)
+        self.assertEqual(reason, "fail_budget_met")
+
+    def test_catch_up_cap_stops(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(catch_up_rounds=12, max_catch_up=12))
+        self.assertFalse(cont)
+        self.assertEqual(reason, "catch_up_cap")
+
+    def test_pass_fill_after_n_until_total(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(submitted=40, observed=10))
+        self.assertTrue(cont)
+        self.assertEqual(reason, "pass_fill")
+
+    def test_zero_fail_target_runs_until_change_cap(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(
+                target_fails=0, submitted=40, observed=0, now=50.0))
+        self.assertTrue(cont)
+        self.assertEqual(reason, "run")
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(
+                target_fails=0, submitted=100, observed=0))
+        self.assertFalse(cont)
+        self.assertEqual(reason, "change_cap")
+
+    def test_stop_requested(self):
+        cont, reason = traffic_loop_should_continue(
+            **self._kwargs(stop=True))
+        self.assertFalse(cont)
+        self.assertEqual(reason, "stop")
 
 
 class FailsForDurationBatchTests(unittest.TestCase):

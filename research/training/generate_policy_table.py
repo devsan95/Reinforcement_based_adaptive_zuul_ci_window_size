@@ -21,13 +21,13 @@ class SimpleGateEnv:
 
     def __init__(self, failure_rate=0.2, seed=0):
         self.failure_rate = failure_rate
-        self.window_floor = 3
-        self.window_ceiling = 50
+        self.window_floor = 2
+        self.window_ceiling = 25
         self._rng = random.Random(seed)
         self.reset()
 
     def reset(self):
-        self.window = 20
+        self.window = 8
         self.queue_depth = self._rng.randint(0, 30)
         return self._obs()
 

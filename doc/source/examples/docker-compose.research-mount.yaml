@@ -1,4 +1,13 @@
 # Mount patched RL source into stock Zuul images (no Docker rebuild required).
+#
+# NOTE: this mounts source only — the stock quay.io/zuul-ci/zuul-scheduler
+# image has no stable-baselines3/torch installed, so pointing
+# RL_WINDOW_POLICY_PATH at a .zip PPO checkpoint here will fail to import
+# and silently fall back to the heuristic policy (zuul/rl_window.py
+# _load_policy catches the ImportError). For pure-PPO live serving, use
+# docker-compose.rl-app.yaml / Dockerfile.rl-app instead, which installs
+# stable-baselines3 into the scheduler image. This mount-only variant
+# stays on the dependency-free policy table for fast source iteration.
 services:
   scheduler:
     image: quay.io/zuul-ci/zuul-scheduler

@@ -1,0 +1,10 @@
+{"timestamp": 1781685524.5834978, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781688884.0992634, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781689215.3080854, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781689473.660873, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781689944.8754063, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781690184.9537902, "queue": "/zuul/tenant/example-tenant/pipeline/gate/queue/7da1eab400884b71b0c81a3fd6852e1d", "event": "set_window", "size": 18, "source": "agent"}
+{"timestamp": 1781690184.9546397, "queue": "/zuul/tenant/example-tenant/pipeline/gate/queue/7da1eab400884b71b0c81a3fd6852e1d", "event": "agent_tick", "state": [0.4, 0.12, 0.0, 0.515038074910054, -0.8571673007021124, 0.0], "action_idx": 0, "action_delta": -2, "actual_window": 20, "recommended_window": 18, "tcp_shadow_window": 20, "rl_vs_tcp_delta": -2, "mode": "active", "policy": "ppo_table"}
+{"timestamp": 1781690240.7895696, "queue": "_scheduler", "event": "agent_started", "tenant": "example-tenant", "pipeline": "gate", "mode": "active"}
+{"timestamp": 1781690270.2894187, "queue": "/zuul/tenant/example-tenant/pipeline/gate/queue/7da1eab400884b71b0c81a3fd6852e1d", "event": "tcp_shadow", "succeeded": true, "window_before": 18, "window_after": 19}
+{"timestamp": 1781690270.2934222, "queue": "/zuul/tenant/example-tenant/pipeline/gate/queue/7da1eab400884b71b0c81a3fd6852e1d", "event": "tcp_adjust", "succeeded": true, "window_before": 18, "window_after": 19}

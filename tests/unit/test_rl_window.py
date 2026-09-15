@@ -28,8 +28,10 @@ from zuul.rl_window import (
     KNN_MAX_DISTANCE,
     STATE_LABELS,
     STATE_SIZE,
+    ExecutorSnapshot,
     QueueMetrics,
     WindowController,
+    _executor_audit_fields,
     adjust_window_after_cycle,
     get_rl_state,
     set_window_from_api,
@@ -332,10 +334,11 @@ class RLStatePolicyTests(unittest.TestCase):
         self.assertEqual(self.controller._success_streak(metrics), 0)
 
     def test_table_query_maps_live_state_to_table_space(self):
-        # live: [norm_w, queue/(2*ceiling), fail, streak, util, pressure]
+        # live: [norm_w, queue/(2*ceiling), fail, streak, available, pressure]
         live = [0.4, 0.25, 0.15, 0.3, 0.7, 0.9]
         query = WindowController._table_query(live)
         # table: [norm_w, queue/ceiling, fail, hour_sin, hour_cos, pressure]
+        # executor_available (0.7) is dropped; table 6th dim is queue/window.
         self.assertEqual(query, [0.4, 0.5, 0.15, 0.0, 1.0, 0.9])
 
     def test_knn_vote_prefers_nearby_majority(self):
@@ -376,7 +379,7 @@ class RLStatePolicyTests(unittest.TestCase):
         self.controller._policy_entries = [
             {"state": [0.4, 0.5, 0.5, 0.0, 1.0, 0.5], "action_idx": 0},
         ]
-        live = [0.4, 0.25, 0.5, 0.0, 0.0, 0.5]
+        live = [0.4, 0.25, 0.5, 0.0, 1.0, 0.5]
         action, reason, meta = self.controller._choose_action(live)
         self.assertEqual(ACTION_DELTAS[action], 0)
         self.assertIn("Held the window", reason)
@@ -391,7 +394,7 @@ class RLStatePolicyTests(unittest.TestCase):
         self.controller._policy_entries = [
             {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 2},
         ]
-        live = [0.4, 0.25, 0.0, 0.8, 0.0, 0.5]
+        live = [0.4, 0.25, 0.0, 0.8, 1.0, 0.5]
         action, reason, meta = self.controller._choose_action(live)
         self.assertEqual(ACTION_DELTAS[action], 2)
         self.assertIn("Increased the window by 2", reason)
@@ -400,13 +403,13 @@ class RLStatePolicyTests(unittest.TestCase):
 
     def test_heuristic_reason_strings(self):
         # No policy loaded at all → pure heuristic with clear reasons.
-        burst = [0.4, 0.25, 0.5, 0.0, 0.0, 0.5]
+        burst = [0.4, 0.25, 0.5, 0.0, 1.0, 0.5]
         action, reason, meta = self.controller._choose_action(burst)
         self.assertEqual(ACTION_DELTAS[action], 0)
         self.assertIn("Held the window", reason)
         self.assertIn("holding through failures", reason)
         self.assertEqual(meta["source"], "heuristic")
-        healthy = [0.4, 0.25, 0.0, 0.5, 0.0, 0.5]
+        healthy = [0.4, 0.25, 0.0, 0.5, 1.0, 0.5]
         action, reason, _ = self.controller._choose_action(healthy)
         self.assertEqual(ACTION_DELTAS[action], 2)
         self.assertIn("Increased the window by 2", reason)
@@ -419,12 +422,11 @@ class RLStatePolicyTests(unittest.TestCase):
         self.controller._policy_entries = [
             {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 0},
         ]
-        live = [0.4, 0.25, 0.0, 0.0, 0.0, 0.5]
+        live = [0.4, 0.25, 0.0, 0.0, 1.0, 0.5]
         action, reason, meta = self.controller._choose_action(live)
         self.assertEqual(ACTION_DELTAS[action], -2)
         self.assertIn("Reduced the window by 2", reason)
-        self.assertIn("gentle trim", reason)
-        self.assertIn("TCP would have halved", reason)
+        self.assertIn("sharp cut", reason)
         self.assertNotIn("by -2", reason)
         self.assertNotIn("kNN", reason)
         self.assertNotIn("nearest", reason)
@@ -448,6 +450,297 @@ class RLStatePolicyTests(unittest.TestCase):
         self.assertEqual(ACTION_DELTAS[action], 0)
         self.assertIn("Held the window", reason)
         self.assertNotIn("kNN", reason)
+
+
+class _FakePPOModel:
+    """Stand-in for a loaded stable_baselines3.PPO model's .predict()."""
+
+    def __init__(self, action_idx):
+        self.action_idx = action_idx
+        self.calls = []
+
+    def predict(self, obs, deterministic=True):
+        self.calls.append((tuple(obs), deterministic))
+        return self.action_idx, None
+
+
+class RLPurePPOTests(unittest.TestCase):
+    """A loaded PPO network's action must be used as-is: no guardrails,
+    no kNN table, no TCP-shadow floor. Required for RQ2 — the
+    statistical comparison must evaluate the learned policy on its own
+    merits (thesis Section 3.2.3 / 6.4)."""
+
+    def setUp(self):
+        self.controller = WindowController()
+        self.queue = FakeChangeQueue()
+
+    def test_ppo_takes_priority_over_policy_table(self):
+        # Even with a kNN table loaded, a loaded PPO model wins.
+        self.controller._policy_table = {}
+        self.controller._policy_entries = [
+            {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 4},
+        ]
+        self.controller._policy = _FakePPOModel(action_idx=0)  # shrink −2
+        live = [0.4, 0.25, 0.0, 0.0, 1.0, 0.5]
+        action, reason, meta = self.controller._choose_action(live)
+        self.assertEqual(action, 0)
+        self.assertEqual(meta["source"], "ppo")
+
+    def test_ppo_action_not_wrapped_in_guardrails(self):
+        # Failure burst (>DEMO_HOLD_FAILURE_RATE) would normally force a
+        # hold via _guarded()/hold_on_failure_burst; pure PPO must be
+        # free to shrink anyway.
+        self.controller._policy = _FakePPOModel(action_idx=0)  # −2
+        burst = [0.4, 0.25, 0.5, 0.0, 1.0, 0.5]
+        action, reason, meta = self.controller._choose_action(burst)
+        self.assertEqual(action, 0)
+        self.assertEqual(ACTION_DELTAS[action], -2)
+        self.assertEqual(meta["source"], "ppo")
+        self.assertNotIn("guardrail", meta)
+        self.assertNotIn("holding through failures", reason)
+
+    def test_ppo_action_ignores_scarce_executor_hold(self):
+        # Guardrail would normally hold/trim growth when executors are
+        # scarce; pure PPO's chosen growth must still apply.
+        self.controller._policy = _FakePPOModel(action_idx=4)  # +2
+        live = [0.4, 0.25, 0.0, 0.0, 0.04, 0.5]
+        snap = ExecutorSnapshot(
+            capacity=50, available=2, in_use=48,
+            available_ratio=0.04, occupancy=0.96, source="launcher")
+        action, reason, meta = self.controller._choose_action(
+            live, snapshot=snap, current_window=20)
+        self.assertEqual(action, 4)
+        self.assertEqual(meta["source"], "ppo")
+        self.assertNotIn("guardrail", meta)
+
+    def test_ppo_window_not_floored_at_tcp_shadow(self):
+        # TCP shadow sits at 15; PPO recommends shrinking to 8. The old
+        # demo behaviour would clamp the applied window up to 15
+        # (self._enforce_rl_tcp_floor's max(requested, tcp_shadow));
+        # pure PPO must be allowed to go lower.
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 10
+        self.controller._tcp_shadow[key] = 15
+        self.controller._policy = _FakePPOModel(action_idx=0)  # −2
+        recommended = self.controller._apply_action(
+            self.queue, 0, apply=False, decision_source="ppo")
+        self.assertEqual(recommended, 8)  # 10 - 2, not floored to 15
+        self.assertLess(recommended, self.controller._tcp_shadow[key])
+
+    def test_non_ppo_source_still_gets_tcp_floor(self):
+        # Sanity check that the default (table/heuristic) behaviour is
+        # unchanged when decision_source is not "ppo".
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 10
+        self.controller._tcp_shadow[key] = 15
+        recommended = self.controller._apply_action(
+            self.queue, 0, apply=False, decision_source="heuristic")
+        self.assertEqual(recommended, 15)  # floored up to TCP shadow
+
+    def test_ppo_still_clamped_to_pipeline_bounds(self):
+        # Physical validity (floor/ceiling) always applies, even to a
+        # pure PPO decision — this is not a "guardrail", it is what
+        # keeps the window a legal value.
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 4
+        self.controller._tcp_shadow[key] = 3
+        self.controller._policy = _FakePPOModel(action_idx=0)  # −2 -> 2
+        recommended = self.controller._apply_action(
+            self.queue, 0, apply=False, decision_source="ppo")
+        self.assertEqual(recommended, self.queue.window_floor)  # clamped to 3
+
+    def test_ppo_predict_called_with_state_vector(self):
+        model = _FakePPOModel(action_idx=2)
+        self.controller._policy = model
+        live = [0.4, 0.25, 0.1, 0.2, 0.8, 0.3]
+        self.controller._choose_action(live)
+        self.assertEqual(len(model.calls), 1)
+        obs, deterministic = model.calls[0]
+        self.assertEqual(list(obs), live)
+        self.assertTrue(deterministic)
+
+
+class RLExecutorAvailabilityTests(unittest.TestCase):
+    """Window must move with launcher/nodepool slot availability."""
+
+    def setUp(self):
+        self.controller = WindowController()
+        self.queue = FakeChangeQueue()
+
+    def _snapshot(self, available, capacity=50, source="launcher"):
+        in_use = max(0, capacity - available)
+        return ExecutorSnapshot(
+            capacity=capacity,
+            available=available,
+            in_use=in_use,
+            available_ratio=_clip_ratio(available, capacity),
+            occupancy=_clip_ratio(in_use, capacity),
+            source=source,
+        )
+
+    def test_state_label_is_executor_available(self):
+        self.assertEqual(STATE_LABELS[4], "executor_available")
+
+    def test_launcher_ready_slots_feed_state(self):
+        summaries = [
+            {"uuid": "host", "state": "slot-host", "main_node_id": None,
+             "subnodes": ["a", "b", "c", "d"], "slot": None},
+            {"uuid": "a", "state": "ready", "main_node_id": "host",
+             "subnodes": [], "slot": 0},
+            {"uuid": "b", "state": "ready", "main_node_id": "host",
+             "subnodes": [], "slot": 1},
+            {"uuid": "c", "state": "in-use", "main_node_id": "host",
+             "subnodes": [], "slot": 2},
+            {"uuid": "d", "state": "in-use", "main_node_id": "host",
+             "subnodes": [], "slot": 3},
+        ]
+        scheduler = mock.Mock()
+        scheduler.launcher.listProviderNodeSummaries.return_value = summaries
+        scheduler.abide.tenants = {}
+        with mock.patch.dict(os.environ, {"RL_WINDOW_EXECUTOR_CAPACITY": "50"}):
+            state = self.controller.get_rl_state(scheduler, self.queue)
+        self.assertEqual(len(state), STATE_SIZE)
+        # 2 ready / capacity 50 (env) → 0.04 available_ratio
+        self.assertAlmostEqual(state[4], 2 / 50, places=4)
+        snap = self.controller._executor_snapshot
+        self.assertEqual(snap.source, "launcher")
+        self.assertEqual(snap.available, 2)
+        self.assertEqual(snap.in_use, 2)
+        self.assertEqual(snap.capacity, 50)
+
+    def test_count_launcher_slots_skips_slot_host(self):
+        counted = WindowController._count_launcher_slots([
+            {"state": "slot-host"},
+            {"state": "ready"},
+            {"state": "ready"},
+            {"state": "in-use"},
+            {"state": "building"},
+        ])
+        self.assertEqual(counted, (2, 1, 1))
+
+    def test_high_occupancy_holds_instead_of_ramping(self):
+        # Success streak would otherwise +2; few free slots must hold/trim.
+        live = [0.4, 0.4, 0.0, 0.8, 0.15, 1.0]
+        snap = self._snapshot(available=2, capacity=50)
+        action, reason, meta = self.controller._choose_action(
+            live, snapshot=snap, current_window=20)
+        self.assertLessEqual(ACTION_DELTAS[action], 0)
+        self.assertEqual(ACTION_DELTAS[action], 0)
+        self.assertIn("only 2 executors free", reason)
+        self.assertIn("Held the window", reason)
+
+    def test_extreme_occupancy_trims_window(self):
+        live = [0.4, 0.4, 0.0, 0.0, 0.04, 1.0]
+        snap = self._snapshot(available=2, capacity=50)
+        action, reason, _ = self.controller._choose_action(
+            live, snapshot=snap, current_window=20)
+        self.assertEqual(ACTION_DELTAS[action], -1)
+        self.assertIn("Reduced the window", reason)
+        self.assertIn("only 2 executors free", reason)
+
+    def test_high_occupancy_clamps_window_to_free_slots(self):
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 20
+        self.controller._tcp_shadow[key] = 5
+        self.controller._executor_snapshot = self._snapshot(
+            available=4, capacity=50)
+        # Policy +2 would be 22; cap at max(floor=3, available=4).
+        recommended = self.controller._apply_action(
+            self.queue, 4, apply=False)
+        self.assertEqual(recommended, 4)
+        self.assertGreaterEqual(recommended, self.queue.window_floor)
+
+    def test_capacity_clamp_can_win_over_tcp_floor(self):
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 20
+        self.controller._tcp_shadow[key] = 10
+        self.controller._executor_snapshot = self._snapshot(
+            available=4, capacity=50)
+        recommended = self.controller._apply_action(
+            self.queue, 4, apply=False)
+        self.assertEqual(recommended, 4)
+        self.assertLess(recommended, self.controller._tcp_shadow[key])
+
+    def test_capacity_clamp_does_not_go_below_floor(self):
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 8
+        self.controller._tcp_shadow[key] = 3
+        self.controller._executor_snapshot = self._snapshot(
+            available=1, capacity=50)
+        recommended = self.controller._apply_action(
+            self.queue, 2, apply=False)  # hold at 8 → cap to floor 3
+        self.assertEqual(recommended, self.queue.window_floor)
+
+    def test_plenty_free_and_healthy_can_grow(self):
+        # No success streak; deep queue + low failures + many free slots.
+        live = [0.16, 0.4, 0.0, 0.0, 0.9, 1.0]
+        snap = self._snapshot(available=45, capacity=50)
+        action, reason, meta = self.controller._choose_action(
+            live, snapshot=snap, current_window=8)
+        self.assertGreater(ACTION_DELTAS[action], 0)
+        self.assertIn("executors free", reason)
+        self.assertIn("queue is deep", reason)
+
+    def test_table_grow_blocked_when_slots_scarce(self):
+        self.controller._policy_kind = "ppo_table"
+        self.controller._policy_table = {}
+        self.controller._policy_entries = [
+            {"state": [0.4, 0.5, 0.0, 0.0, 1.0, 0.5], "action_idx": 4},
+        ]
+        live = [0.4, 0.25, 0.0, 0.0, 0.04, 0.5]
+        snap = self._snapshot(available=2, capacity=50)
+        action, reason, meta = self.controller._choose_action(
+            live, snapshot=snap, current_window=20)
+        self.assertEqual(ACTION_DELTAS[action], 0)
+        self.assertEqual(meta.get("guardrail"), "hold_on_low_executors")
+        self.assertIn("only 2 executors free", reason)
+
+    def test_tcp_floor_kept_when_capacity_is_plenty(self):
+        key = self.controller._queue_key(self.queue)
+        self.queue.window = 8
+        self.controller._tcp_shadow[key] = 15
+        self.controller._executor_snapshot = self._snapshot(
+            available=40, capacity=50)
+        size = self.controller.set_window_from_api(
+            self.queue, 8, source="agent")
+        self.assertEqual(size, 15)
+
+    def test_running_builds_fallback_occupancy(self):
+        scheduler = mock.Mock(
+            executor=mock.Mock(
+                running_builds={"a": 1, "b": 2, "c": 3},
+                executor_api=None),
+            launcher=mock.Mock(spec=[]),
+            nodepool=mock.Mock(spec=[]),
+        )
+        scheduler.abide.tenants = {}
+        with mock.patch.dict(os.environ, {"RL_WINDOW_EXECUTOR_CAPACITY": "4"}):
+            self.controller._executor_snapshot = None
+            self.controller._executor_snapshot_at = 0.0
+            state = self.controller.get_rl_state(scheduler, self.queue)
+        # 3 running / 4 capacity → 1 free → available_ratio 0.25
+        self.assertAlmostEqual(state[4], 0.25, places=4)
+        self.assertEqual(self.controller._executor_snapshot.source,
+                         "running_builds")
+
+    def test_executor_audit_fields_named_slots_and_ratio(self):
+        snap = self._snapshot(available=2, capacity=50)
+        fields = _executor_audit_fields(snap)
+        self.assertEqual(fields["available_slots"], 2)
+        self.assertEqual(fields["executor_capacity"], 50)
+        self.assertEqual(fields["executor_in_use"], 48)
+        self.assertAlmostEqual(fields["executor_available"], 2 / 50)
+        self.assertAlmostEqual(fields["executor_occupancy"], 48 / 50)
+        self.assertEqual(fields["executor_source"], "launcher")
+        empty = _executor_audit_fields(None)
+        self.assertIsNone(empty["available_slots"])
+        self.assertIsNone(empty["executor_available"])
+
+
+def _clip_ratio(part, whole):
+    whole = max(int(whole), 1)
+    return max(0.0, min(1.0, float(part) / whole))
+
 
 if __name__ == "__main__":
     unittest.main()

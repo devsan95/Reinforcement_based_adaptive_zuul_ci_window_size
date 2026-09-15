@@ -47,8 +47,10 @@ DEMO_DURATION_SEC = float(os.environ.get("DEMO_DURATION_SEC", "300"))
 DEMO_FAIL_PER_BATCH = int(os.environ.get("DEMO_FAIL_PER_BATCH", "5"))
 DEMO_PASS_PER_BATCH = int(os.environ.get("DEMO_PASS_PER_BATCH", "5"))
 
-# Rotate scenarios across batches.
+# Rotate scenarios across batches. demo-depend is skipped when the user
+# sets an exact gate_failures count so Depends-On cannot swallow stamps.
 TOPICS = ("demo-burst", "demo-steady", "demo-depend")
+INDEPENDENT_TOPICS = ("demo-burst", "demo-steady")
 
 # Fail rule: indices [0, FAIL) fail; [FAIL, SIZE) pass.
 # Default 5+5 → ≥3 fail and ≤5 pass per batch of 10.
@@ -58,6 +60,40 @@ def batch_should_fail(batch_index: int,
                       fail_per_batch: int = DEMO_FAIL_PER_BATCH) -> bool:
     """Deterministic per-batch fail rule used by generator + gate job."""
     return int(batch_index) < int(fail_per_batch)
+
+
+def plan_batch_specs(
+        batch_num: int,
+        batch_size: int,
+        fail_per_batch: int,
+        prior_change_ids: Optional[Sequence[str]] = None,
+        enable_depend: bool = True,
+) -> Tuple[str, List[Tuple[int, bool, Optional[str]]]]:
+    """Build (topic, [(batch_index, should_fail, depends_on), ...]).
+
+    Fail stamps occupy the first fail_per_batch indices. Depends-On is
+    never applied to a fail-stamped change (a failing parent would skip
+    the dependent's gate job). When enable_depend is False the depend
+    topic is omitted entirely.
+    """
+    topics = TOPICS if enable_depend else INDEPENDENT_TOPICS
+    topic = topics[int(batch_num) % len(topics)]
+    prior = list(prior_change_ids or [])
+    anchor = prior[-1] if prior else None
+    specs: List[Tuple[int, bool, Optional[str]]] = []
+    for i in range(max(0, int(batch_size))):
+        should_fail = batch_should_fail(i, fail_per_batch)
+        depends_on = None
+        if (
+            enable_depend
+            and topic == "demo-depend"
+            and anchor
+            and i >= batch_size // 2
+            and not should_fail
+        ):
+            depends_on = anchor
+        specs.append((i, should_fail, depends_on))
+    return topic, specs
 
 
 def _auth_header() -> str:
@@ -255,21 +291,19 @@ def _submit_one(
         f"synthetic change {global_index} at {time.time()}\n"
         f"batch={batch_num} index={batch_index} fail={int(should_fail)}\n"
     )
-    # Stamped metadata for gate-job fail rule (read from workspace).
-    meta = {
-        "batch": batch_num,
-        "batch_index": batch_index,
-        "should_fail": bool(should_fail),
-        "topic": topic or "",
-        "global_index": global_index,
-        "fail_rule": (
-            f"batch_index < {DEMO_FAIL_PER_BATCH} "
-            f"→ fail ({DEMO_FAIL_PER_BATCH} fail / "
-            f"{DEMO_PASS_PER_BATCH} pass per {DEMO_BATCH_SIZE})"
-        ),
-    }
-    (repo / "demo-meta.json").write_text(
-        json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    # Fail-rule metadata (batch/batch_index/should_fail/topic) travels in
+    # the commit message (_build_commit_message) only — NOT as a repo
+    # file. Every change in a batch is cloned from the same master HEAD
+    # (_setup_repo does a fresh clone per change), so a shared file like
+    # the old demo-meta.json here would get a different diff from every
+    # concurrent change; once Zuul's gate speculatively stacks two such
+    # changes, their competing edits to that file are a genuine git merge
+    # conflict — Zuul logs "Unable to merge" and the item's build never
+    # runs, well before the gate job script (which read the file) ever
+    # gets a chance to execute. Commit messages don't have this problem:
+    # each commit's own message is independent metadata that survives
+    # merging trees together, so the gate job (gate-job.yaml) now reads
+    # `git log -1 --format=%B` instead of a file.
 
     message = _build_commit_message(
         global_index=global_index,
@@ -312,6 +346,7 @@ def submit_batch(
         start_index: int = 0,
         prior_change_ids: Optional[Sequence[str]] = None,
         on_progress=None,
+        enable_depend: bool = True,
 ) -> dict:
     """Submit one batch of changes with topic + optional Depends-On mix.
 
@@ -319,26 +354,24 @@ def submit_batch(
     and skipped — one bad change can never block the batch. on_progress, when
     given, is called as on_progress(done_count, batch_size) after each change.
 
-    Scenario rotation by batch_num % 3:
+    Scenario rotation by batch_num % 3 (when enable_depend):
       0 demo-burst  — independent changes, shared topic
       1 demo-steady — independent changes, shared topic
-      2 demo-depend — half the batch Depends-On a prior Change-Id
+      2 demo-depend — later-half *pass* changes Depends-On a prior Change-Id
+    When enable_depend is False (exact fail-count demos), only independent
+    topics are used so every should_fail stamp can run its own gate job.
     """
-    topic = TOPICS[batch_num % len(TOPICS)]
+    topic, specs = plan_batch_specs(
+        batch_num,
+        batch_size,
+        fail_per_batch,
+        prior_change_ids=prior_change_ids,
+        enable_depend=enable_depend,
+    )
     workdir = Path(tempfile.mkdtemp(prefix=f"zuul-traffic-b{batch_num}-"))
     workers = max(1, min(workers, batch_size))
-    prior = list(prior_change_ids or [])
-    anchor = prior[-1] if prior else None
 
-    specs = []
-    for i in range(batch_size):
-        should_fail = batch_should_fail(i, fail_per_batch)
-        depends_on = None
-        # demo-depend: later half of batch depends on a previous Change-Id
-        if topic == "demo-depend" and anchor and i >= batch_size // 2:
-            depends_on = anchor
-        specs.append((i, should_fail, depends_on))
-
+    intended_fails = sum(1 for _i, should_fail, _d in specs if should_fail)
     submitted = 0
     gated = 0
     fail_stamped = 0
@@ -413,7 +446,9 @@ def submit_batch(
         "gated": gated,
         "skipped": skipped,
         "fail_stamped": fail_stamped,
+        "fail_intended": intended_fails,
         "pass_stamped": max(0, gated - fail_stamped),
+        "enable_depend": bool(enable_depend),
         "change_ids": change_ids,
         "change_nums": change_nums,
         "start_index": start_index,

@@ -2517,7 +2517,10 @@ class PipelineManager(metaclass=ABCMeta):
                 log.info("Changes for %s did not merge because it %s, "
                          "status: all-succeeded: %s, merged: %s",
                          item, error_reason, succeeded, merged)
-                if not succeeded:
+                # Only a genuine gate JOB failure should move the window —
+                # a merge conflict means no job ever ran, so it carries no
+                # information about whether the tested code was good.
+                if error_reason == "failed tests":
                     from zuul.rl_window import adjust_window_after_cycle
                     adjust_window_after_cycle(change_queue, succeeded=False)
                 raise exceptions.MergeFailure(

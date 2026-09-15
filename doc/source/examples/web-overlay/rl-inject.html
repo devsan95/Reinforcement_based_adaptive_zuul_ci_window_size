@@ -1,4 +1,4 @@
-    <!-- zuul-rl-overlay-begin -->
+﻿    <!-- zuul-rl-overlay-begin -->
     <style id="zuul-rl-window-style">
       #zuul-rl-window-banner {
         background: #004368;
@@ -45,8 +45,9 @@
         position: fixed;
         right: 14px;
         bottom: 14px;
-        width: 500px;
-        height: 640px;
+        width: 720px;
+        height: 860px;
+        max-height: 92vh;
         z-index: 10001;
         border: 1px solid #8a8d90;
         border-radius: 6px;
@@ -63,6 +64,7 @@
       }
       #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-report-body,
       #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-run-btn,
+      #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-stop-btn,
       #zuul-rl-report-panel.zuul-rl-minimized #zuul-rl-report-link {
         display: none;
       }
@@ -127,8 +129,8 @@
         background: #6a6e73;
         cursor: default;
       }
-      #zuul-rl-extend-btn {
-        background: #3e8635;
+      #zuul-rl-stop-btn {
+        background: #c9190b;
         color: #fff;
         border: 0;
         border-radius: 3px;
@@ -137,7 +139,7 @@
         font-size: 12px;
         margin-right: 8px;
       }
-      #zuul-rl-extend-btn[disabled] {
+      #zuul-rl-stop-btn[disabled] {
         background: #6a6e73;
         cursor: default;
       }
@@ -252,10 +254,53 @@
         font-weight: 600;
         color: #151515;
         margin-bottom: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .zuul-rl-enlarge-btn {
+        background: transparent;
+        color: #4b4b4b;
+        border: 1px solid #b8b8b8;
+        border-radius: 3px;
+        width: 20px;
+        height: 18px;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .zuul-rl-enlarge-btn:hover {
+        background: #e2e2e2;
+      }
+      .zuul-rl-explain-btn {
+        background: transparent;
+        color: #06c;
+        border: 1px solid #b8d6f0;
+        border-radius: 3px;
+        padding: 1px 6px;
+        cursor: pointer;
+        font-size: 10px;
+        margin: 3px 0 2px;
+      }
+      .zuul-rl-explain-btn:hover {
+        background: #eaf3fc;
+      }
+      .zuul-rl-chart-explain {
+        font-size: 10.5px;
+        line-height: 1.45;
+        color: #292929;
+        background: #f4f8fc;
+        border: 1px solid #d3e3f2;
+        border-radius: 3px;
+        padding: 6px 8px;
+        margin: 2px 0 6px;
       }
       .zuul-rl-chart {
         width: 100%;
-        height: 110px;
+        height: 170px;
         border: 1px solid #d2d2d2;
         border-radius: 3px;
         display: block;
@@ -265,6 +310,23 @@
         font-size: 10px;
         color: #6a6e73;
         margin-top: 2px;
+      }
+      .zuul-rl-chart-stats {
+        font-size: 10px;
+        color: #151515;
+        margin-top: 3px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .zuul-rl-chart-stats b {
+        font-weight: 600;
+      }
+      .zuul-rl-chart-stats .rl-stat b {
+        color: #06c;
+      }
+      .zuul-rl-chart-stats .tcp-stat b {
+        color: #b3760c;
       }
       .zuul-rl-legend span {
         margin-right: 10px;
@@ -297,7 +359,7 @@
       }
       .zuul-rl-highlight-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 6px;
         margin-bottom: 0;
       }
@@ -592,6 +654,155 @@
         color: #004368;
         font-size: 14px;
       }
+      .zuul-rl-hl-cap {
+        font-size: 10px;
+        color: #6a6e73;
+        margin-top: 3px;
+        line-height: 1.3;
+        font-weight: 400;
+      }
+      .zuul-rl-section.zuul-rl-hero {
+        border: 2px solid #06c;
+      }
+      .zuul-rl-section.zuul-rl-hero .zuul-rl-section-title {
+        background: #004368;
+        color: #fff;
+      }
+      .zuul-rl-section.zuul-rl-hero .zuul-rl-section-num {
+        background: #fff;
+        color: #004368;
+      }
+      .zuul-rl-section.zuul-rl-section-done {
+        border: 2px solid #3e8635;
+      }
+      .zuul-rl-section.zuul-rl-section-done .zuul-rl-section-title {
+        background: #3e8635;
+        color: #fff;
+      }
+      .zuul-rl-section.zuul-rl-section-done .zuul-rl-section-num {
+        background: #fff;
+        color: #3e8635;
+      }
+      .zuul-rl-now-compare {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+        margin: 6px 0 4px;
+      }
+      .zuul-rl-now-win {
+        flex: 1;
+        text-align: center;
+        border-radius: 6px;
+        padding: 8px 6px 7px;
+        min-width: 0;
+      }
+      .zuul-rl-now-rl {
+        background: #e7f1fa;
+        border: 2px solid #06c;
+      }
+      .zuul-rl-now-tcp {
+        background: #fef6e0;
+        border: 2px solid #f0ab00;
+      }
+      .zuul-rl-now-win-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #151515;
+      }
+      .zuul-rl-now-win-num {
+        font-size: 34px;
+        font-weight: 800;
+        line-height: 1.05;
+        margin: 2px 0 2px;
+      }
+      .zuul-rl-now-rl .zuul-rl-now-win-num { color: #06c; }
+      .zuul-rl-now-tcp .zuul-rl-now-win-num { color: #c46100; }
+      .zuul-rl-now-win-cap {
+        font-size: 10px;
+        color: #393f44;
+        line-height: 1.3;
+      }
+      .zuul-rl-now-vs {
+        display: flex;
+        align-items: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #6a6e73;
+        flex-shrink: 0;
+      }
+      .zuul-rl-now-delta {
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        margin: 0 0 6px;
+        color: #151515;
+        line-height: 1.35;
+      }
+      .zuul-rl-now-delta.zuul-rl-now-ahead { color: #1e4f18; }
+      .zuul-rl-start-tip {
+        font-size: 11px;
+        color: #151515;
+        margin: 0 0 6px;
+        line-height: 1.4;
+      }
+      .zuul-rl-after-idle {
+        font-size: 11px;
+        color: #6a6e73;
+        line-height: 1.4;
+      }
+      .zuul-rl-after-story {
+        font-size: 12.5px;
+        line-height: 1.5;
+        margin: 0 0 8px;
+        color: #151515;
+      }
+      .zuul-rl-after-run {
+        background: #e7f6e7;
+        border: 1px solid #3e8635;
+        border-left: 4px solid #3e8635;
+        margin-top: 0;
+      }
+      .zuul-rl-after-details,
+      .zuul-rl-more-charts,
+      .zuul-rl-fail-details {
+        font-size: 11px;
+        color: #393f44;
+        margin-top: 6px;
+      }
+      .zuul-rl-after-details > summary,
+      .zuul-rl-more-charts > summary,
+      .zuul-rl-fail-details > summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #0066cc;
+      }
+      .zuul-rl-control-buttons #zuul-rl-run-btn,
+      .zuul-rl-control-buttons #zuul-rl-stop-btn {
+        font-weight: 700;
+        padding: 7px 16px;
+        font-size: 13px;
+      }
+      .zuul-rl-chart-axis-hint {
+        font-size: 9px;
+        color: #6a6e73;
+        margin-top: 1px;
+      }
+      .zuul-rl-chart-caption {
+        font-size: 10px;
+        color: #393f44;
+        line-height: 1.35;
+        margin: 0 0 4px;
+      }
+      #zuul-rl-executor-chart {
+        width: 100%;
+        height: 120px;
+        display: block;
+        background: #fafafa;
+        border: 1px solid #d2d2d2;
+        border-radius: 3px;
+      }
     </style>
     <script>
     (function () {
@@ -614,7 +825,7 @@
       var DEMO_DURATION_SEC = 300;
       var DEMO_FAIL_PER_BATCH = 5;
       // Bumped when the panel HTML structure changes so stale panels rebuild.
-      var PANEL_LAYOUT_VERSION = '10';
+      var PANEL_LAYOUT_VERSION = '14';
       var demoInputsPrefillDone = false;
 
       /** Prefer the coherent session_summary block; fall back to legacy fields. */
@@ -754,6 +965,35 @@
           });
       }
 
+      function syncDemoControlButtons(panel, prog, running) {
+        if (!panel) {
+          return;
+        }
+        var stopping = !!(prog && (
+          prog.stopping || prog.phase === 'stopping'));
+        var runBtn = panel.querySelector('#zuul-rl-run-btn');
+        var stopBtn = panel.querySelector('#zuul-rl-stop-btn');
+        var windingDown = !!(running && prog && prog.phase &&
+          prog.phase !== 'submitting_traffic' &&
+          prog.phase !== 'starting');
+        if (runBtn) {
+          runBtn.disabled = !!running;
+          if (stopping) {
+            runBtn.textContent = 'Stopping...';
+          } else if (windingDown) {
+            runBtn.textContent = 'Finishing...';
+          } else {
+            runBtn.textContent = running ? 'Running...' : 'Run demo';
+          }
+        }
+        if (stopBtn) {
+          var showStop = !!running;
+          stopBtn.style.display = showStop ? 'inline-block' : 'none';
+          stopBtn.disabled = !running || stopping;
+          stopBtn.textContent = stopping ? 'Stopping\u2026' : 'Stop demo';
+        }
+      }
+
       function applyDemoInputDefaults(panel, metrics, statusData) {
         if (!panel || demoInputsPrefillDone) {
           return;
@@ -791,18 +1031,35 @@
           failsInp.value = String(DEMO_EXPECTED_FAILURES);
         }
         demoInputsPrefillDone = true;
+        if (!demoRunning) {
+          setFailCard(panel, 0, DEMO_EXPECTED_FAILURES);
+        }
       }
 
       function expectedFailuresFrom(metrics, prog) {
-        if (prog && prog.expected_failures != null &&
-            !isNaN(Number(prog.expected_failures))) {
-          return Math.max(0, Math.round(Number(prog.expected_failures)));
+        function asCount(v) {
+          if (v == null || isNaN(Number(v))) {
+            return null;
+          }
+          return Math.max(0, Math.round(Number(v)));
         }
-        if (metrics && metrics.expected_failures != null &&
-            !isNaN(Number(metrics.expected_failures))) {
-          return Math.max(0, Math.round(Number(metrics.expected_failures)));
+        var n = asCount(prog && prog.gate_failures_target);
+        if (n != null) {
+          return n;
         }
-        return DEMO_EXPECTED_FAILURES;
+        n = asCount(prog && prog.expected_failures);
+        if (n != null) {
+          return n;
+        }
+        n = asCount(metrics && metrics.gate_failures_target);
+        if (n != null) {
+          return n;
+        }
+        n = asCount(metrics && metrics.expected_failures);
+        if (n != null) {
+          return n;
+        }
+        return targetFailsFromInputs(document.getElementById(PANEL_ID));
       }
       var lastMetrics = null;
       var lastStatusData = null;
@@ -811,6 +1068,364 @@
       var demoRunning = false;
       var metricsInFlight = false;
       var chartDrawPending = false;
+      var enlargedChartKey = null;
+
+      function _finiteVals(arr) {
+        return (arr || []).filter(function (v) {
+          return v != null && !isNaN(v) && isFinite(v);
+        });
+      }
+
+      function _minMax(arr) {
+        var vals = _finiteVals(arr);
+        if (!vals.length) {
+          return null;
+        }
+        return { min: Math.min.apply(null, vals), max: Math.max.apply(null, vals) };
+      }
+
+      function _fmtNum(v) {
+        if (v == null || isNaN(v)) {
+          return '?';
+        }
+        return (Math.round(v * 10) / 10).toString().replace(/\.0$/, '');
+      }
+
+      function _axisLabel(v) {
+        if (v == null || isNaN(v)) {
+          return '';
+        }
+        var abs = Math.abs(v);
+        var rounded = abs >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+        return rounded.toString().replace(/\.0$/, '');
+      }
+
+      function _sessionSpanText(metrics) {
+        var ts = _finiteVals(metrics && metrics.timestamps);
+        var n = (metrics && metrics.timestamps) ?
+          metrics.timestamps.length : 0;
+        if (ts.length < 2) {
+          return n + ' data point(s) so far — run or continue a demo to ' +
+            'fill this chart in.';
+        }
+        var spanSec = ts[ts.length - 1] - ts[0];
+        var spanTxt = spanSec >= 90 ?
+          (Math.round(spanSec / 60)) + ' min' : Math.round(spanSec) + 's';
+        return n + ' ticks over ' + spanTxt;
+      }
+
+      var CHART_DEFS = {
+        window: {
+          title: 'RL vs TCP window (full session)',
+          draw: function (canvas, metrics) {
+            if (!canvas) {
+              return;
+            }
+            drawLineChart(canvas, [
+              { color: '#06c', values: metrics.rl_window || [], label: 'RL' },
+              { color: '#f0ab00', values: metrics.tcp_window || [], label: 'TCP' }
+            ], {
+              timestamps: metrics.timestamps,
+              failures: metrics.failures || [],
+              ylabel: 'Window size',
+              showChangeIds: true,
+              annotateWindows: true
+            });
+            var statsEl = document.getElementById('zuul-rl-window-stats');
+            if (statsEl) {
+              var rlR = _minMax(metrics.rl_window);
+              var tcpR = _minMax(metrics.tcp_window);
+              statsEl.innerHTML =
+                '<span class="rl-stat">RL window: min <b>' +
+                (rlR ? _fmtNum(rlR.min) : '—') + '</b> · max <b>' +
+                (rlR ? _fmtNum(rlR.max) : '—') + '</b></span>' +
+                '<span class="tcp-stat">TCP window: min <b>' +
+                (tcpR ? _fmtNum(tcpR.min) : '—') + '</b> · max <b>' +
+                (tcpR ? _fmtNum(tcpR.max) : '—') + '</b></span>';
+            }
+          },
+          explain: function (metrics) {
+            var rlRange = _minMax(metrics.rl_window);
+            var tcpRange = _minMax(metrics.tcp_window);
+            var fails = (metrics.failures || []).length;
+            return '<b>X axis</b> — time elapsed this session (' +
+              _sessionSpanText(metrics) + '). A new point lands every ' +
+              'time the RL agent or the TCP shadow re-evaluates the ' +
+              'window: roughly every ~10s, plus immediately after any ' +
+              'real gate cycle finishes. <b>Y axis</b> — window size, ' +
+              'i.e. how many changes that policy lets run in parallel. ' +
+              'RL (blue) ranged ' +
+              (rlRange ? _fmtNum(rlRange.min) + '–' + _fmtNum(rlRange.max) : '?') +
+              '; it moves because the trained PPO model picks a delta ' +
+              '(−2, −1, 0, +1 or +2) each tick from the live failure ' +
+              'rate, queue pressure and free-executor ratio — not a ' +
+              'fixed rule, so it can hold steady through noise or grow ' +
+              'several ticks in a row. TCP (orange) ranged ' +
+              (tcpRange ? _fmtNum(tcpRange.min) + '–' + _fmtNum(tcpRange.max) : '?') +
+              '; it only reacts to this queue\'s own outcomes — halve ' +
+              'on a failure, +1 after a success — so it moves in ' +
+              'sharper, delayed steps. The ' + fails + ' red dashed ' +
+              'line(s) mark real gate failures: that is where TCP ' +
+              'visibly drops and RL\'s response (hold, small trim, or a ' +
+              'matching cut) is the actual behaviour under test.';
+          }
+        },
+        executor: {
+          title: 'RL window vs free executors (nodepool)',
+          draw: function (canvas, metrics) {
+            if (!canvas) {
+              return;
+            }
+            drawLineChart(canvas, [
+              { color: '#06c', values: metrics.rl_window || [], label: 'RL' },
+              {
+                color: '#3e8635',
+                values: metrics.available_slots || [],
+                label: 'Free'
+              }
+            ], {
+              timestamps: metrics.timestamps,
+              failures: metrics.failures || [],
+              ylabel: 'Slots',
+              yMin: 0,
+              emptyText: 'Waiting for nodepool readings…'
+            });
+          },
+          explain: function (metrics) {
+            var rlRange = _minMax(metrics.rl_window);
+            var freeRange = _minMax(metrics.available_slots);
+            return '<b>X axis</b> — the same per-tick timeline as the ' +
+              'window chart (' + _sessionSpanText(metrics) + '). ' +
+              '<b>Y axis</b> — two independent series sharing one slot ' +
+              'count. Free executors (green) ranged ' +
+              (freeRange ? _fmtNum(freeRange.min) + '–' + _fmtNum(freeRange.max) : '?') +
+              ' and varies because it is a live nodepool reading ' +
+              '(capacity minus builds currently in use) — it drops as ' +
+              'more gate jobs run at once and recovers as they finish, ' +
+              'independent of anything the RL agent decides. RL window ' +
+              '(blue) ranged ' +
+              (rlRange ? _fmtNum(rlRange.min) + '–' + _fmtNum(rlRange.max) : '?') +
+              ' and should track near or below the free-executor line: ' +
+              'when it drifts far above green, the agent is sizing the ' +
+              'window bigger than the pipeline can actually run at ' +
+              'once, which is exactly the failure mode this chart is ' +
+              'meant to expose.';
+          }
+        },
+        efficiency: {
+          title: 'Advantage % over time',
+          draw: function (canvas, metrics) {
+            if (!canvas) {
+              return;
+            }
+            drawLineChart(canvas, [
+              { color: '#06c', values: metrics.throughput_efficiency || [] }
+            ], {
+              timestamps: metrics.timestamps,
+              failures: metrics.failures || [],
+              ylabel: 'Advantage %'
+            });
+          },
+          explain: function (metrics) {
+            var advRange = _minMax(metrics.throughput_efficiency);
+            var fails = (metrics.failures || []).length;
+            return '<b>X axis</b> — the same per-tick timeline as the ' +
+              'other charts (' + _sessionSpanText(metrics) + '). ' +
+              '<b>Y axis</b> — RL\'s percentage edge over the TCP shadow ' +
+              'window at that same moment (symmetric, clamped to ' +
+              '±200% so one near-zero TCP value can\'t blow up the ' +
+              'scale). It ranged ' +
+              (advRange ? _fmtNum(advRange.min) + '%–' + _fmtNum(advRange.max) + '%' : '?') +
+              ' and sits near 0% whenever both windows agree, then ' +
+              'jumps at one of the ' + fails + ' gate failure(s) marked ' +
+              'on this chart — that is the instant TCP halves its ' +
+              'window while RL holds steady or cuts less, and the gap ' +
+              'between them is exactly the parallel-execution advantage ' +
+              'this experiment is trying to demonstrate.';
+          }
+        },
+        extra: {
+          title: 'Extras per failure',
+          draw: function (canvas, metrics) {
+            if (!canvas) {
+              return;
+            }
+            drawExtraBarChart(canvas, metrics.failures || []);
+          },
+          explain: function (metrics) {
+            var fails = metrics.failures || [];
+            var extras = fails.map(function (f) {
+              var v = f && (f.extra_changes != null ? f.extra_changes :
+                f.changes_in_window_delta);
+              return Number(v);
+            }).filter(function (v) { return !isNaN(v); });
+            var range = extras.length ?
+              { min: Math.min.apply(null, extras),
+                max: Math.max.apply(null, extras) } : null;
+            return '<b>X axis</b> — not time: each bar is one gate ' +
+              'failure, in the order it happened (' + fails.length +
+              ' so far), so the spacing between bars carries no time ' +
+              'meaning. <b>Y axis</b> — extra parallel slots RL was ' +
+              'holding above TCP at the moment of that specific ' +
+              'failure (RL window − TCP window right then), ranging ' +
+              (range ? _fmtNum(range.min) + '–' + _fmtNum(range.max) : '0') +
+              '. It varies bar to bar because it depends on how much ' +
+              'each policy had already grown or shrunk since the ' +
+              'previous failure: a failure landing after a long quiet ' +
+              'growth streak produces a tall bar, while one landing ' +
+              'right after a prior failure (when TCP is already near ' +
+              'its floor) produces a short one.';
+          }
+        },
+        throughput: {
+          title: 'Gate throughput (builds / min, full session)',
+          draw: function (canvas, metrics) {
+            if (!canvas) {
+              return;
+            }
+            drawLineChart(canvas, [
+              { color: '#3e8635', values: metrics.throughput || [] }
+            ], {
+              timestamps: metrics.timestamps,
+              failures: metrics.failures || [],
+              ylabel: 'Builds / min'
+            });
+          },
+          explain: function (metrics) {
+            var range = _minMax(metrics.throughput);
+            var fails = (metrics.failures || []).length;
+            return '<b>X axis</b> — the same per-tick timeline as the ' +
+              'other charts (' + _sessionSpanText(metrics) + '). ' +
+              '<b>Y axis</b> — completed gate builds per minute, ' +
+              'counted from how many builds finished in each interval. ' +
+              'It ranged ' +
+              (range ? _fmtNum(range.min) + '–' + _fmtNum(range.max) : '?') +
+              ' and rises when a batch of changes clears the gate ' +
+              'together, then drops toward 0 during quiet stretches or ' +
+              'while the pipeline is waiting on a slow build or one of ' +
+              'the ' + fails + ' failure(s) to be dequeued and reset. ' +
+              'This is the downstream effect of the window size, not ' +
+              'the window size itself — a wider RL window only raises ' +
+              'this line if the executors are actually free to run ' +
+              'that many builds at once.';
+          }
+        }
+      };
+
+      function ensureChartModal() {
+        var modal = document.getElementById('zuul-rl-chart-modal');
+        if (modal) {
+          return modal;
+        }
+        modal = document.createElement('div');
+        modal.id = 'zuul-rl-chart-modal';
+        modal.style.cssText = 'display:none;position:fixed;inset:0;' +
+          'background:rgba(0,0,0,0.75);z-index:100000;align-items:center;' +
+          'justify-content:center;padding:24px;';
+        modal.innerHTML =
+          '<div style="background:#1b1b1b;border-radius:6px;padding:14px;' +
+          'max-width:96vw;max-height:92vh;display:flex;flex-direction:column;' +
+          'gap:8px;box-shadow:0 8px 32px rgba(0,0,0,0.6);">' +
+          '<div style="display:flex;justify-content:space-between;' +
+          'align-items:center;gap:12px;">' +
+          '<span id="zuul-rl-chart-modal-title" ' +
+          'style="color:#fff;font-size:14px;font-weight:600;"></span>' +
+          '<button id="zuul-rl-chart-modal-close" type="button" ' +
+          'style="background:transparent;color:#fff;border:1px solid #6a6e73;' +
+          'border-radius:3px;width:26px;height:26px;cursor:pointer;' +
+          'font-size:16px;line-height:1;">×</button>' +
+          '</div>' +
+          '<canvas id="zuul-rl-chart-modal-canvas" width="1200" height="560" ' +
+          'style="width:100%;height:auto;max-height:80vh;background:#fafafa;' +
+          'border-radius:3px;"></canvas>' +
+          '</div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', function (e) {
+          if (e.target === modal) {
+            closeChartModal();
+          }
+        });
+        modal.querySelector('#zuul-rl-chart-modal-close')
+          .addEventListener('click', closeChartModal);
+        return modal;
+      }
+
+      function closeChartModal() {
+        var modal = document.getElementById('zuul-rl-chart-modal');
+        if (modal) {
+          modal.style.display = 'none';
+        }
+        enlargedChartKey = null;
+      }
+
+      function openChartModal(key) {
+        var def = CHART_DEFS[key];
+        if (!def) {
+          return;
+        }
+        var modal = ensureChartModal();
+        modal.style.display = 'flex';
+        enlargedChartKey = key;
+        var titleEl = modal.querySelector('#zuul-rl-chart-modal-title');
+        if (titleEl) {
+          titleEl.textContent = def.title;
+        }
+        var canvas = modal.querySelector('#zuul-rl-chart-modal-canvas');
+        def.draw(canvas, lastMetrics || baselineMetrics());
+      }
+
+      function redrawEnlargedChartIfOpen(metrics) {
+        if (!enlargedChartKey || !metrics) {
+          return;
+        }
+        var modal = document.getElementById('zuul-rl-chart-modal');
+        if (!modal || modal.style.display === 'none') {
+          return;
+        }
+        var def = CHART_DEFS[enlargedChartKey];
+        var canvas = modal.querySelector('#zuul-rl-chart-modal-canvas');
+        if (def && canvas) {
+          def.draw(canvas, metrics);
+        }
+      }
+
+      function toggleChartExplain(panel, btn) {
+        var key = btn.getAttribute('data-chart');
+        var box = panel.querySelector('#zuul-rl-explain-' + key);
+        if (!box) {
+          return;
+        }
+        var showing = box.style.display !== 'none';
+        if (showing) {
+          box.style.display = 'none';
+          btn.textContent = 'Explain graph';
+          return;
+        }
+        var def = CHART_DEFS[key];
+        if (def && def.explain) {
+          box.innerHTML = def.explain(lastMetrics || baselineMetrics());
+        }
+        box.style.display = 'block';
+        btn.textContent = 'Hide explanation';
+      }
+
+      function refreshOpenChartExplains(panel, metrics) {
+        if (!panel || !metrics) {
+          return;
+        }
+        panel.querySelectorAll('.zuul-rl-chart-explain').forEach(
+          function (box) {
+            if (box.style.display === 'none') {
+              return;
+            }
+            var key = box.id.replace('zuul-rl-explain-', '');
+            var def = CHART_DEFS[key];
+            if (def && def.explain) {
+              box.innerHTML = def.explain(metrics);
+            }
+          });
+      }
+
       var badgeEnhanceTimer = null;
       var statusPollTimer = null;
       var gridRefreshTimer = null;
@@ -826,14 +1441,16 @@
       var CONN_LOST_AFTER_FAILURES = 2;
 
       var DEMO_PHASE_LABELS = {
-        starting: 'Starting demo',
-        waiting_audit: 'Waiting for RL audit',
-        resetting_windows: 'Resetting windows',
-        clearing_queues: 'Clearing pipeline queues',
-        submitting_traffic: 'Submitting changes',
-        waiting_gate_cycles: 'Waiting for gate cycles',
-        generating_report: 'Generating report',
-        publishing: 'Publishing report',
+        starting: 'Starting the demo',
+        waiting_audit: 'Waiting for the RL agent',
+        resetting_windows: 'Resetting both windows to 8',
+        clearing_queues: 'Clearing the pipeline',
+        submitting_traffic: 'Sending changes through the gate',
+        waiting_gate_cycles: 'Waiting for jobs to finish',
+        generating_report: 'Writing the comparison',
+        publishing: 'Publishing the report',
+        stopping: 'Stopping the demo',
+        cancelled: 'Demo stopped',
         done: 'Demo complete',
         error: 'Demo failed'
       };
@@ -843,6 +1460,81 @@
         var m = Math.floor(sec / 60);
         var s = sec % 60;
         return m + ':' + (s < 10 ? '0' : '') + s;
+      }
+
+      function formatFailCount(x) {
+        return String(x);
+      }
+
+      function targetFailsFromInputs(panel) {
+        if (!panel) {
+          panel = document.getElementById(PANEL_ID);
+        }
+        if (!panel) {
+          return DEMO_EXPECTED_FAILURES;
+        }
+        var inp = panel.querySelector('#zuul-rl-gate-failures');
+        var n = inp ? numOrNull(inp.value) : null;
+        if (n == null) {
+          return DEMO_EXPECTED_FAILURES;
+        }
+        return Math.max(0, Math.round(n));
+      }
+
+      function setFailCard(panel, x, y) {
+        if (!panel) {
+          return;
+        }
+        var el = panel.querySelector('#zuul-rl-hl-failures');
+        if (el) {
+          el.textContent = formatFailCount(x, y);
+        }
+      }
+
+      function shortenDecisionReason(reason) {
+        var s = String(reason || '').trim();
+        if (!s) {
+          return '';
+        }
+        s = s.replace(/\s*Only \d+ executors free\.?/gi, '').trim();
+        var first = s.split(/\.\s+/)[0].replace(/\s+$/, '');
+        if (first && !/[.!?]$/.test(first)) {
+          first += '.';
+        }
+        if (first.length > 110) {
+          first = first.slice(0, 107) + '\u2026';
+        }
+        return first;
+      }
+
+      function buildAfterRunStory(summary, expectedN) {
+        var tcpFloor = numOrNull(summary && summary.tcp_after_floor);
+        var rlPeak = numOrNull(summary && summary.rl_held_peak);
+        var extras = (summary && summary.extra_changes_total) || 0;
+        var failN = (summary && summary.gate_failures) || 0;
+        var s1;
+        if (tcpFloor != null) {
+          s1 = 'Traditional TCP shrank the gate window as low as ' +
+            Math.round(tcpFloor) + ' after jobs failed.';
+        } else {
+          s1 = 'Traditional TCP shrinks the gate window after each failed job.';
+        }
+        var s2;
+        if (rlPeak != null && tcpFloor != null && rlPeak > tcpFloor) {
+          s2 = 'RL held or grew the window (up to ' + Math.round(rlPeak) +
+            '), so more changes kept testing in parallel.';
+        } else if (rlPeak != null) {
+          s2 = 'RL stayed near window ' + Math.round(rlPeak) +
+            ', in step with TCP.';
+        } else {
+          s2 = 'RL kept the window at least as open as TCP.';
+        }
+        var s3 = extras > 0 ?
+          'Those extra parallel slots are Extra vs TCP (' + extras +
+            ') in This session.' :
+          'This run did not accumulate extra slots vs TCP.';
+        var s4 = 'Gate failures totaled ' + failN + ' this session.';
+        return s1 + ' ' + s2 + ' ' + s3 + ' ' + s4;
       }
 
       function renderDemoWarning(panel, text) {
@@ -899,7 +1591,6 @@
         var phaseEl = panel.querySelector('#zuul-rl-demo-phase');
         var detailEl = panel.querySelector('#zuul-rl-demo-detail');
         var bar = panel.querySelector('#zuul-rl-demo-bar');
-        var extendBtn = panel.querySelector('#zuul-rl-extend-btn');
         if (!block || !phaseEl || !detailEl || !bar) {
           return;
         }
@@ -909,9 +1600,7 @@
           bar.style.width = '0%';
           renderDemoWarning(panel, null);
           setDemoInputsDisabled(panel, false);
-          if (extendBtn) {
-            extendBtn.style.display = 'none';
-          }
+          syncDemoControlButtons(panel, prog, false);
           return;
         }
         block.classList.add('zuul-rl-demo-active');
@@ -929,101 +1618,71 @@
         var phase = prog.phase || 'starting';
         var label = DEMO_PHASE_LABELS[phase] || phase;
         var pct = prog.percent != null ? prog.percent : 0;
-        phaseEl.textContent = label + (pct > 0 ? ' (' + pct + '%)' : '');
-        var parts = [];
-        var batchesDone = prog.batches_completed || 0;
-        var batchesPlan = Math.max(prog.batches_planned || 0, batchesDone);
-        var batchCurrent = Number(prog.batch_current);
-        if (!batchCurrent || isNaN(batchCurrent)) {
-          // Fallback when older control server omits batch_current.
-          batchCurrent = prog.traffic_active
-            ? Math.max(batchesDone, batchesPlan > 0 ? 1 : 0)
-            : batchesDone;
+        phaseEl.textContent = label + (pct > 0 && pct < 100 ? ' \u2014 ' + pct + '%' : '');
+        var sent = Math.max(0, Math.round(Number(prog.changes_submitted) || 0));
+        var totalCh = prog.total_changes != null && !isNaN(Number(prog.total_changes))
+          ? Math.max(0, Math.round(Number(prog.total_changes)))
+          : DEMO_CHANGE_COUNT;
+        var failY = expectedFailuresFrom(lastMetrics, prog);
+        var failX = 0;
+        if (lastMetrics) {
+          failX = getSessionSummary(lastMetrics).gate_failures || 0;
         }
+        if (prog.failures_so_far != null &&
+            !isNaN(Number(prog.failures_so_far))) {
+          failX = Math.max(
+            failX, Math.max(0, Math.round(Number(prog.failures_so_far))));
+        }
+        var sentence = label + '.';
+        if (phase === 'submitting_traffic' || prog.traffic_active) {
+          sentence = sent + ' of ' + totalCh + ' changes sent. ' +
+            failX + ' of ' + failY + ' jobs have failed.';
+          // The window reacts to every failed cycle, not just stamped job
+          // failures (merge conflicts fail a cycle with no job ever run).
+          // Surface that total too whenever it's the bigger number, so
+          // "0 job failures" next to a window that has clearly shrunk
+          // doesn't look broken.
+          var cycleFails = prog.cycle_failures_so_far != null &&
+            !isNaN(Number(prog.cycle_failures_so_far)) ?
+            Math.max(0, Math.round(Number(prog.cycle_failures_so_far))) : null;
+          if (cycleFails != null && cycleFails > failX) {
+            sentence += ' (' + cycleFails +
+              ' cycle failures so far, incl. merge conflicts.)';
+          }
+          if (prog.time_remaining_s != null) {
+            sentence += ' About ' + formatMmSs(prog.time_remaining_s) + ' left.';
+          }
+        } else if (phase === 'done') {
+          sentence = 'Demo complete. Read After the run below.';
+        } else if (phase === 'stopping' || phase === 'cancelled') {
+          sentence = (prog.message && String(prog.message)) ||
+            'Stopping demo\u2026 clearing queues';
+        } else if (phase === 'clearing_queues') {
+          sentence = 'Clearing the pipeline so the run starts clean.';
+        } else if (phase === 'resetting_windows') {
+          sentence = 'Both windows start at 8 so the comparison is fair.';
+        } else if (prog.message && phase !== 'starting') {
+          sentence = String(prog.message);
+        }
+        detailEl.textContent = sentence;
+        detailEl.removeAttribute('title');
         var batchTipEl = panel.querySelector('#zuul-rl-demo-batch-tip');
-        if (batchesPlan > 0 || batchesDone > 0 || batchCurrent > 0) {
-          var showX = Math.max(batchCurrent, batchesDone);
-          var showY = Math.max(batchesPlan, showX);
-          parts.push(
-            'Batch ' + showX + ' of ' + showY +
-            ' \u2014 submitting changes in groups');
-          if (detailEl) {
-            detailEl.title =
-              'X = current batch index · Y = planned batches for this demo';
-          }
-        }
-        if (prog.changes_submitted > 0) {
-          parts.push(prog.changes_submitted + ' changes');
-        }
-        if (prog.time_remaining_s != null && prog.traffic_active) {
-          parts.push('~' + formatMmSs(prog.time_remaining_s) + ' left');
-        }
-        if (prog.failures_so_far > 0) {
-          parts.push(prog.failures_so_far + ' stamped fails');
-        }
-        if (prog.extra_in_flight > 0) {
-          parts.push('+' + prog.extra_in_flight + ' extra in flight');
-        }
-        if (prog.message && parts.length < 2) {
-          parts.push(prog.message);
-        } else if (prog.message && phase === 'clearing_queues') {
-          parts = [prog.message];
-        }
-        if (prog.elapsed_s > 0 && !prog.traffic_active) {
-          parts.push(prog.elapsed_s + 's elapsed');
-        }
-        detailEl.textContent = parts.join(' \u00b7 ');
         if (batchTipEl) {
-          var tip = prog.batches_plan_tip || '';
-          if (!tip && batchesPlan > 0) {
-            var interval = prog.batch_interval_sec || 20;
-            var duration = prog.duration_sec || 300;
-            var batchSize = prog.batch_size || DEMO_BATCH_SIZE || 10;
-            if (prog.total_changes != null && Number(prog.total_changes) > 0) {
-              tip = 'Y = ' + batchesPlan + ': ' + prog.total_changes +
-                ' changes \u00f7 ' + batchSize + ' per batch';
-            } else {
-              var mins = Math.max(1, Math.round(Number(duration) / 60));
-              tip = 'Y = ' + batchesPlan + ': ~' + mins +
-                ' min session \u00f7 ' + Math.round(Number(interval)) +
-                's interval';
-            }
-          }
-          if (tip) {
-            batchTipEl.textContent = tip;
-            batchTipEl.style.display = '';
-            batchTipEl.title =
-              'Y is planned batches: defaults ~5 min session \u00f7 ~20s ' +
-              'interval \u2248 15, or Changes \u00f7 batch size when set.';
-          } else {
-            batchTipEl.textContent = '';
-            batchTipEl.style.display = 'none';
-            batchTipEl.removeAttribute('title');
-          }
+          batchTipEl.textContent = '';
+          batchTipEl.style.display = 'none';
         }
-        // Keep Session summary Failures X/Y + Submitted in sync with progress.
-        var failCard = panel.querySelector('#zuul-rl-hl-failures');
-        if (failCard) {
-          var failX = 0;
-          if (lastMetrics) {
-            failX = getSessionSummary(lastMetrics).gate_failures || 0;
-          }
-          failCard.textContent = failX + '/' + DEMO_EXPECTED_FAILURES;
-        }
+        setFailCard(panel, failX, failY);
         var submittedCard = panel.querySelector('#zuul-rl-hl-submitted');
         if (submittedCard && prog.changes_submitted != null &&
             !isNaN(Number(prog.changes_submitted))) {
           submittedCard.textContent = String(
             Math.max(0, Math.round(Number(prog.changes_submitted))));
         }
-        if (extendBtn) {
-          var showExtend = !!(prog.extend_available || prog.traffic_active ||
-            (demoRunning && phase === 'submitting_traffic'));
-          extendBtn.style.display = showExtend ? 'inline-block' : 'none';
-          extendBtn.disabled = !showExtend;
-        }
+        syncDemoControlButtons(panel, prog, !!demoRunning);
         bar.classList.remove('zuul-rl-demo-indeterminate');
-        if (pct > 0 && pct < 100) {
+        if (phase === 'stopping') {
+          bar.classList.add('zuul-rl-demo-indeterminate');
+        } else if (pct > 0 && pct < 100) {
           bar.style.width = pct + '%';
         } else if (phase === 'done') {
           bar.style.width = '100%';
@@ -1097,19 +1756,31 @@
           })
           .then(function (prog) {
             demoProgressFailStreak = 0;
-            var btn = panel.querySelector('#zuul-rl-run-btn');
             var running = !!prog.running;
+            var stopping = !!(prog.stopping || prog.phase === 'stopping');
             if (demoRunning !== running) {
               demoRunning = running;
               onDemoRunningChanged();
             }
-            if (btn) {
-              btn.disabled = running;
-              btn.textContent = running ? 'Running...' : 'Run demo';
+            if (stopping) {
+              demoRunning = true;
             }
+            syncDemoControlButtons(panel, prog, running || stopping);
             renderDemoProgress(prog);
             checkProgressStaleness(prog);
+            var statusEl = panel.querySelector('#zuul-rl-status');
+            if (stopping && statusEl) {
+              statusEl.textContent = prog.message ||
+                'Stopping demo\u2026 clearing queues';
+              statusEl.className = 'zuul-rl-status-line zuul-rl-status-running';
+            }
             if (!running) {
+              if (statusEl && (prog.phase === 'cancelled' ||
+                  prog.phase === 'stopping')) {
+                statusEl.textContent = prog.message ||
+                  'Demo stopped. Click Run demo to start.';
+                statusEl.className = 'zuul-rl-status-line';
+              }
               stopDemoPolling();
               refreshAllParallel();
               pollStatus();
@@ -1140,41 +1811,18 @@
           var throughputCanvas = panel.querySelector('#zuul-rl-throughput-chart');
           var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
           var extraCanvas = panel.querySelector('#zuul-rl-extra-chart');
+          var executorCanvas = panel.querySelector('#zuul-rl-executor-chart');
           var failuresEl = panel.querySelector('#zuul-rl-failures');
           var compareEl = panel.querySelector('#zuul-rl-comparison');
           var status = panel.querySelector('#zuul-rl-status');
 
-          drawLineChart(windowCanvas, [
-            { color: '#06c', values: metrics.rl_window || [], label: 'RL' },
-            { color: '#f0ab00', values: metrics.tcp_window || [], label: 'TCP' }
-          ], {
-            timestamps: metrics.timestamps,
-            failures: metrics.failures,
-            ylabel: 'window size',
-            showChangeIds: true,
-            annotateWindows: true
-          });
-
-          drawLineChart(throughputCanvas, [
-            { color: '#3e8635', values: metrics.throughput || [] }
-          ], {
-            timestamps: metrics.timestamps,
-            failures: metrics.failures,
-            ylabel: 'builds/min'
-          });
-
-          var effSeries = (metrics.throughput_efficiency || []).map(function (v) {
-            return v == null ? null : v;
-          });
-          drawLineChart(efficiencyCanvas, [
-            { color: '#06c', values: effSeries }
-          ], {
-            timestamps: metrics.timestamps,
-            failures: metrics.failures,
-            ylabel: 'advantage %'
-          });
-
-          drawExtraBarChart(extraCanvas, metrics.failures || []);
+          CHART_DEFS.window.draw(windowCanvas, metrics);
+          CHART_DEFS.throughput.draw(throughputCanvas, metrics);
+          CHART_DEFS.efficiency.draw(efficiencyCanvas, metrics);
+          CHART_DEFS.extra.draw(extraCanvas, metrics);
+          CHART_DEFS.executor.draw(executorCanvas, metrics);
+          redrawEnlargedChartIfOpen(metrics);
+          refreshOpenChartExplains(panel, metrics);
 
           renderFailures(
             failuresEl, metrics.failures, metrics.failure_counts, metrics);
@@ -1184,21 +1832,14 @@
           renderDecisionReason(panel, metrics);
 
           if (status && metrics.latest && !status.classList.contains('zuul-rl-status-error')) {
-            // Ops-only status — metrics live in Session / Live sections.
             if (demoRunning) {
-              status.textContent =
-                'Demo running — progress above; session & live below.';
-              status.className = 'zuul-rl-status-line zuul-rl-status-running';
-            } else if ((getSessionSummary(metrics).gate_failures || 0) > 0 ||
-                       metrics.demo_phase === 'done') {
-              status.textContent =
-                metrics.demo_phase === 'done' ?
-                  'Demo complete — session summary below.' :
-                  'Live — session & live metrics below.';
+              status.textContent = '';
+              status.className = 'zuul-rl-status-line';
+            } else if (metrics.demo_phase === 'done') {
+              status.textContent = 'Demo complete \u2014 read After the run.';
               status.className = 'zuul-rl-status-line zuul-rl-status-live';
             } else {
-              status.textContent =
-                'Ready — Run demo for a ~5 min continuous traffic session.';
+              status.textContent = 'Click Run demo to start.';
               status.className = 'zuul-rl-status-line';
             }
           }
@@ -1206,36 +1847,59 @@
       }
 
       function renderLiveLine(panel, metrics) {
-        var el = panel.querySelector('#zuul-rl-live-line');
-        if (!el) {
-          return;
-        }
+        var rlEl = panel.querySelector('#zuul-rl-now-rl');
+        var tcpEl = panel.querySelector('#zuul-rl-now-tcp');
+        var deltaEl = panel.querySelector('#zuul-rl-now-delta');
+        var legacy = panel.querySelector('#zuul-rl-live-line');
         var summary = getSessionSummary(metrics);
         var live = summary.live || {};
         var latest = (metrics && metrics.latest) || {};
         var rlWin = live.rl_window != null ? live.rl_window : latest.rl_window;
         var tcpWin = live.tcp_window != null ? live.tcp_window : latest.tcp_window;
         if (rlWin == null || tcpWin == null) {
-          el.className = '';
-          el.textContent = 'Live: waiting for window data\u2026';
+          if (rlEl) {
+            rlEl.textContent = '\u2014';
+          }
+          if (tcpEl) {
+            tcpEl.textContent = '\u2014';
+          }
+          if (deltaEl) {
+            deltaEl.className = 'zuul-rl-now-delta';
+            deltaEl.textContent = 'Waiting for the first window reading\u2026';
+          }
+          if (legacy) {
+            legacy.className = '';
+            legacy.textContent = 'Live: waiting for window data\u2026';
+          }
           return;
         }
-        var q = live.gate_queue_count != null ? live.gate_queue_count :
-          (latest.gate_queue_count != null ? latest.gate_queue_count : 0);
-        var liveExtra = live.extra_in_flight != null ? live.extra_in_flight : 0;
-        var maxWin = Math.max(rlWin, tcpWin || 0);
-        var target = latest.queue_target != null ? latest.queue_target : maxWin;
-        var saturated = latest.queue_saturated != null ?
-          latest.queue_saturated : (q >= maxWin && maxWin > 0);
-        el.className = saturated ? 'zuul-rl-sat-ok' : 'zuul-rl-sat-low';
-        el.innerHTML =
-          '<strong>Live</strong> · RL <span class="zuul-rl-live-rl">' + rlWin +
-          '</span> / TCP <span class="zuul-rl-live-tcp">' + tcpWin +
-          '</span> · queue ' + q +
-          (liveExtra > 0 ? ' · +' + liveExtra + ' extra in flight' : '') +
-          (saturated ?
-            ' · saturated' :
-            ' · topping up (queue &lt; ' + target + ')');
+        if (rlEl) {
+          rlEl.textContent = String(rlWin);
+        }
+        if (tcpEl) {
+          tcpEl.textContent = String(tcpWin);
+        }
+        var extraNow = Math.max(0, Math.round(Number(rlWin) - Number(tcpWin)));
+        if (deltaEl) {
+          if (extraNow > 0) {
+            deltaEl.className = 'zuul-rl-now-delta zuul-rl-now-ahead';
+            deltaEl.textContent =
+              'RL is keeping the gate ' + extraNow + ' wider than TCP.';
+          } else if (Number(rlWin) === Number(tcpWin)) {
+            deltaEl.className = 'zuul-rl-now-delta';
+            deltaEl.textContent = 'Both windows match right now.';
+          } else {
+            deltaEl.className = 'zuul-rl-now-delta';
+            deltaEl.textContent = 'RL is slightly tighter than TCP.';
+          }
+        }
+        if (legacy) {
+          legacy.className = extraNow > 0 ? 'zuul-rl-sat-ok' : 'zuul-rl-sat-low';
+          legacy.innerHTML =
+            '<strong>Live</strong> \u00b7 RL <span class="zuul-rl-live-rl">' +
+            rlWin + '</span> / TCP <span class="zuul-rl-live-tcp">' + tcpWin +
+            '</span>';
+        }
       }
 
       function renderDecisionReason(panel, metrics) {
@@ -1254,8 +1918,12 @@
             .replace(/"/g, '&quot;');
         }
         if (reason) {
-          // Plain-English reason only; method/kNN behind Details.
+          var short = shortenDecisionReason(reason);
+          var rest = String(reason).trim();
           var tipParts = [];
+          if (rest && rest !== short && rest !== short.replace(/\.$/, '')) {
+            tipParts.push(rest);
+          }
           if (source) {
             tipParts.push('method: ' + source);
           }
@@ -1268,8 +1936,8 @@
           if (prevDetails && prevDetails.open) {
             wasOpen = true;
           }
-          var html = '<span class="zuul-rl-reason-label">RL:</span> ' +
-            esc(reason);
+          var html = '<span class="zuul-rl-reason-label">Why:</span> ' +
+            esc(short);
           if (tip) {
             html +=
               ' <details class="zuul-rl-reason-debug"' +
@@ -1283,8 +1951,8 @@
           }
           el.innerHTML = html;
         } else {
-          el.innerHTML = '<span class="zuul-rl-reason-label">RL:</span> ' +
-            'waiting for first agent tick\u2026';
+          el.innerHTML = '<span class="zuul-rl-reason-label">Why:</span> ' +
+            'waiting for the first decision\u2026';
           el.removeAttribute('title');
         }
       }
@@ -1297,6 +1965,12 @@
         var targetN = expectedFailuresFrom(metrics, null);
         DEMO_EXPECTED_FAILURES = targetN;
         var failN = summary.gate_failures || 0;
+        var counts = (metrics && metrics.failure_counts) || {};
+        if (counts.gate_jobs_total != null &&
+            !isNaN(Number(counts.gate_jobs_total))) {
+          failN = Math.max(
+            failN, Math.max(0, Math.round(Number(counts.gate_jobs_total))));
+        }
         var sessionExtra = summary.extra_changes_total || 0;
         var advPct = summary.rl_advantage_pct;
         var heldRl = summary.rl_held_peak;
@@ -1319,7 +1993,58 @@
         }
         el = panel.querySelector('#zuul-rl-hl-failures');
         if (el) {
-          el.textContent = failN + '/' + targetN;
+          el.textContent = String(failN);
+          var cycleFailsTotal = counts.gate_cycles_total != null &&
+            !isNaN(Number(counts.gate_cycles_total)) ?
+            Math.round(Number(counts.gate_cycles_total)) : null;
+          if (cycleFailsTotal != null && cycleFailsTotal > failN) {
+            el.title = failN + ' stamped job failure(s); ' + cycleFailsTotal +
+              ' total cycle failure(s) including merge conflicts, which ' +
+              'also shrink the window.';
+          } else {
+            el.removeAttribute('title');
+          }
+        }
+        // Submitted = Merged + Dropped + In Progress (still queued, in
+        // check, or building -- not evidence anything failed).
+        // Dropped comes from the server when available (reported gate
+        // failures that left the queue); otherwise fall back to failN.
+        // "In progress" is always the residual, so the equation holds by
+        // construction rather than relying on two independently-tracked
+        // counts to happen to agree.
+        var dropped = summary.dropped != null ?
+          Number(summary.dropped) : failN;
+        if (isNaN(dropped) || dropped < 0) {
+          dropped = 0;
+        }
+        var subForMath = Number(submitted) || 0;
+        var mergedForMath = Number(merged) || 0;
+        var rescheduled = summary.rescheduled != null ?
+          Number(summary.rescheduled) :
+          Math.max(0, subForMath - mergedForMath - dropped);
+        if (isNaN(rescheduled) || rescheduled < 0) {
+          rescheduled = 0;
+        }
+        el = panel.querySelector('#zuul-rl-hl-dropped');
+        if (el) {
+          el.textContent = String(dropped);
+        }
+        el = panel.querySelector('#zuul-rl-hl-rescheduled');
+        if (el) {
+          el.textContent = String(rescheduled);
+          // Residual = submitted - merged - dropped: mostly changes still
+          // queued, in check, or currently building -- not evidence that
+          // anything failed. dropped only counts stamped job failures, so
+          // a merge-conflict dequeue that never ran a job also lands here
+          // even though it won't actually be retried; call that out too
+          // when it's actually happening.
+          el.title = (cycleFailsTotal != null && cycleFailsTotal > failN) ?
+            'Residual = submitted − merged − dropped. Mostly still ' +
+              'queued, in check, or building. Also includes merge-conflict ' +
+              'dequeues, which may not all be retried even though they are ' +
+              'counted here rather than as dropped.' :
+            'Residual = submitted − merged − dropped. Mostly still ' +
+              'queued, in check, or building -- not evidence that anything failed.';
         }
         el = panel.querySelector('#zuul-rl-hl-extra');
         if (el) {
@@ -1331,9 +2056,15 @@
           if (advPct == null || isNaN(Number(advPct)) ||
               (Number(advPct) === 0 && idle)) {
             el.textContent = '\u2014';
+          } else if (summary.advantage_capped &&
+                     summary.rl_advantage_pct_raw != null) {
+            // Show the real number even when the safety cap triggered \u2014
+            // hiding it behind a "200%*" with the raw value only in a
+            // hover tooltip previously made a genuine result look like
+            // a display bug.
+            el.textContent = Number(summary.rl_advantage_pct_raw) + '%';
           } else {
-            el.textContent = Number(advPct) + '%' +
-              (summary.advantage_capped ? '*' : '');
+            el.textContent = Number(advPct) + '%';
           }
         }
         el = panel.querySelector('#zuul-rl-hl-peak');
@@ -1491,15 +2222,20 @@
           '<span class="value">' + esc(submitted) + '</span>' +
           '<span class="label">Merged</span>' +
           '<span class="value">' + esc(merged) + '</span>' +
-          '<span class="label">Failed (gate) / expected</span>' +
-          '<span class="value">' + esc(failN + '/' + expectedN) + '</span>' +
-          '<span class="label">Extra accommodated vs TCP</span>' +
+          '<span class="label">Failed (gate)</span>' +
+          '<span class="value">' + esc(failN) +
+          (summary.cycle_failures_total != null &&
+            Number(summary.cycle_failures_total) > failN ?
+            ' <span style="opacity:.65;font-weight:normal">(' +
+            esc(summary.cycle_failures_total) +
+            ' incl. merge conflicts)</span>' : '') + '</span>' +
+          '<span class="label" title="Measured only at gate-failure moments this session, not the whole run.">Extra accommodated vs TCP</span>' +
           '<span class="value">' + esc(extras) + '</span>' +
-          '<span class="label">RL peak / TCP floor</span>' +
+          '<span class="label" title="RL’s highest and TCP’s lowest window at gate-failure moments -- not the session’s overall peak/floor.">RL peak / TCP floor</span>' +
           '<span class="value">' + esc(peakText) + '</span>' +
-          '<span class="label">Job-runs saved</span>' +
+          '<span class="label" title="Estimated from Extra accommodated vs TCP (gate-failure moments only).">Job-runs saved</span>' +
           '<span class="value">' + esc(jobRuns) + '</span>' +
-          '<span class="label">Advantage</span>' +
+          '<span class="label" title="Extra accommodated vs TCP as a percentage of TCP’s window, at those same gate-failure moments.">Advantage</span>' +
           '<span class="value">' + esc(advText) + '</span>' +
           '</div>';
         if (cmp && cmp.summary) {
@@ -1553,11 +2289,9 @@
           }
           if (st) {
             var link = panel.querySelector('#zuul-rl-report-link');
-            var btn = panel.querySelector('#zuul-rl-run-btn');
-            if (btn) {
-              btn.disabled = !!st.running;
-              btn.textContent = st.running ? 'Running...' : 'Run demo';
-            }
+            var mergedProg = prog || st.demo_progress || {};
+            var running = !!(st.running || (prog && prog.running));
+            syncDemoControlButtons(panel, mergedProg, running);
             if (link && st.latest_run) {
               link.href = REPORT_BASE + '/report.html?v=' + st.latest_run;
             }
@@ -1565,7 +2299,7 @@
               demoRunning = true;
             }
           }
-          if (prog && prog.running) {
+          if (prog && (prog.running || prog.phase === 'stopping')) {
             demoRunning = true;
             renderDemoProgress(prog);
           }
@@ -1597,6 +2331,10 @@
           tcp_window: [BASELINE_WINDOW],
           throughput: [0],
           throughput_efficiency: [0],
+          available_slots: [null],
+          executor_available: [null],
+          executor_capacity: [null],
+          executor_in_use: [null],
           failures: [],
           expected_failures: DEMO_EXPECTED_FAILURES,
           demo_change_count: DEMO_CHANGE_COUNT,
@@ -1664,35 +2402,18 @@
         var throughputCanvas = panel.querySelector('#zuul-rl-throughput-chart');
         var efficiencyCanvas = panel.querySelector('#zuul-rl-efficiency-chart');
         var extraCanvas = panel.querySelector('#zuul-rl-extra-chart');
+        var executorCanvas = panel.querySelector('#zuul-rl-executor-chart');
         var failuresEl = panel.querySelector('#zuul-rl-failures');
         var compareEl = panel.querySelector('#zuul-rl-comparison');
         var status = panel.querySelector('#zuul-rl-status');
 
-        drawLineChart(windowCanvas, [
-          { color: '#06c', values: metrics.rl_window },
-          { color: '#f0ab00', values: metrics.tcp_window }
-        ], {
-          timestamps: metrics.timestamps,
-          failures: [],
-          ylabel: 'window'
-        });
-
-        drawLineChart(throughputCanvas, [
-          { color: '#3e8635', values: metrics.throughput }
-        ], {
-          timestamps: metrics.timestamps,
-          failures: [],
-          ylabel: 'builds/min'
-        });
-
-        drawLineChart(efficiencyCanvas, [
-          { color: '#06c', values: metrics.throughput_efficiency }
-        ], {
-          timestamps: metrics.timestamps,
-          ylabel: '%'
-        });
-
-        drawExtraBarChart(extraCanvas, []);
+        CHART_DEFS.window.draw(windowCanvas, metrics);
+        CHART_DEFS.throughput.draw(throughputCanvas, metrics);
+        CHART_DEFS.efficiency.draw(efficiencyCanvas, metrics);
+        CHART_DEFS.extra.draw(extraCanvas, metrics);
+        CHART_DEFS.executor.draw(executorCanvas, metrics);
+        redrawEnlargedChartIfOpen(metrics);
+        refreshOpenChartExplains(panel, metrics);
         if (compareEl) {
           compareEl.style.display = 'none';
           compareEl.innerHTML = '';
@@ -1814,18 +2535,13 @@
 
           // 1. Demo Control
           section(1, 'Demo Control',
-            'Start or extend the demo; live phase and progress below.',
+            'Start or stop the demo; live phase and progress below.',
             '<div class="zuul-rl-control-buttons">' +
-            '<label class="zuul-rl-demo-params" title="Total changes to submit (default matches empty /run-demo)">' +
-            'Changes <input id="zuul-rl-total-changes" type="number" min="0" max="500" ' +
-            'value="' + DEMO_CHANGE_COUNT + '" step="1"></label>' +
-            '<label class="zuul-rl-demo-params" title="Fails = stamped gate job failures (should_fail / demo-meta), not git merge conflicts. Default matches empty /run-demo.">' +
-            'Fails <input id="zuul-rl-gate-failures" type="number" min="0" max="500" ' +
-            'value="' + DEMO_EXPECTED_FAILURES + '" step="1"></label>' +
             '<button id="zuul-rl-run-btn" type="button">Run demo</button>' +
-            '<button id="zuul-rl-extend-btn" type="button" title="Add 1 more batch of changes (does not cancel in-flight builds)" style="display:none">Extend session</button>' +
+            '<button id="zuul-rl-stop-btn" type="button" title="Stop traffic and clear queues so you can run again" style="display:none">Stop demo</button>' +
             '</div>' +
-            '<div class="zuul-rl-param-tip">Fails = gate job failures (stamped), not merge conflicts</div>' +
+            '<div class="zuul-rl-param-tip">Uses server defaults for changes/fail count \u2014 ' +
+            'fails = gate job failures (stamped), not merge conflicts</div>' +
             '<div id="zuul-rl-demo-progress">' +
             '<div id="zuul-rl-demo-phase">Starting demo\u2026</div>' +
             '<div id="zuul-rl-demo-detail"></div>' +
@@ -1834,7 +2550,7 @@
             '<div id="zuul-rl-demo-warning"></div>' +
             '</div>' +
             '<div id="zuul-rl-status" class="zuul-rl-status-line">' +
-            'Waiting for live metrics\u2026 Adjust Changes/Fails then Run demo.</div>') +
+            'Waiting for live metrics\u2026 Click Run demo to start.</div>') +
 
           // 2. Session summary (headline stats once)
           section(2, 'Session summary',
@@ -1850,13 +2566,24 @@
             '<div class="zuul-rl-highlight-card zuul-rl-hl-fail">' +
             '<div class="zuul-rl-hl-label">Failed (gate)</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-failures">0</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-win zuul-rl-hl-extra">' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-dropped" ' +
+            'title="Submitted changes reported as a gate failure and removed from the queue (not merged, not retried automatically). Submitted = Merged + Dropped + In Progress.">' +
+            '<div class="zuul-rl-hl-label">Dropped</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-dropped">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-rescheduled" ' +
+            'title="Submitted changes not yet merged or dropped -- mostly still queued, in check, or currently building; a smaller part may be genuinely requeued after an upstream reset. Not evidence of a failure by itself. Submitted = Merged + Dropped + In Progress.">' +
+            '<div class="zuul-rl-hl-label">In Progress</div>' +
+            '<div class="zuul-rl-hl-value" id="zuul-rl-hl-rescheduled">0</div></div>' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-win zuul-rl-hl-extra" ' +
+            'title="Measured only at gate-failure moments this session -- where TCP shrinks and RL does not, quantifying the edge under stress. Reads 0 whenever there have been no gate job failures yet, even if the window has been growing from successes.">' +
             '<div class="zuul-rl-hl-label">Extra vs TCP</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-extra">0</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-adv">' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-adv" ' +
+            'title="Extra vs TCP as a percentage of TCP\u2019s window at those same gate-failure moments. Reads \u2014 (no data) rather than 0% whenever there have been no gate job failures yet.">' +
             '<div class="zuul-rl-hl-label">Advantage</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-adv">\u2014</div></div>' +
-            '<div class="zuul-rl-highlight-card zuul-rl-hl-peak">' +
+            '<div class="zuul-rl-highlight-card zuul-rl-hl-peak" ' +
+            'title="RL\u2019s highest window and TCP\u2019s lowest window, both measured only at gate-failure moments this session -- not the session\u2019s overall peak/floor, and not the current live values.">' +
             '<div class="zuul-rl-hl-label">Peak RL / TCP floor</div>' +
             '<div class="zuul-rl-hl-value" id="zuul-rl-hl-peak">\u2014</div></div>' +
             '</div>') +
@@ -1874,28 +2601,56 @@
             'Window sizes over time, advantage trend, per-failure extras, throughput.',
             '<div class="zuul-rl-chart-wrap">' +
             '<div class="zuul-rl-chart-title" title="Full demo session timeline (session start → now). Red markers = gate failures.">' +
-            'RL vs TCP window (full session)</div>' +
-            '<canvas id="zuul-rl-window-chart" class="zuul-rl-chart" width="440" height="140"></canvas>' +
+            '<span>RL vs TCP window (full session)</span>' +
+            '<button class="zuul-rl-enlarge-btn" type="button" data-chart="window" title="Enlarge chart">⤢</button></div>' +
+            '<canvas id="zuul-rl-window-chart" class="zuul-rl-chart" width="660" height="200"></canvas>' +
             '<div class="zuul-rl-legend">' +
             '<span><span class="swatch" style="background:#06c"></span>RL (applied)</span>' +
             '<span><span class="swatch" style="background:#f0ab00"></span>TCP (shadow)</span>' +
             '<span><span class="swatch" style="background:#c9190b;height:8px;width:2px"></span>gate failure</span>' +
-            '</div></div>' +
+            '</div>' +
+            '<div class="zuul-rl-chart-stats" id="zuul-rl-window-stats"></div>' +
+            '<button class="zuul-rl-explain-btn" type="button" data-chart="window">Explain graph</button>' +
+            '<div class="zuul-rl-chart-explain" id="zuul-rl-explain-window" style="display:none"></div>' +
+            '</div>' +
+            '<div class="zuul-rl-chart-wrap">' +
+            '<div class="zuul-rl-chart-title">' +
+            '<span>RL window vs free executors (nodepool)</span>' +
+            '<button class="zuul-rl-enlarge-btn" type="button" data-chart="executor" title="Enlarge chart">⤢</button></div>' +
+            '<div class="zuul-rl-chart-caption">The window should not sit far above free slots. When nodes are busy, RL holds or trims.</div>' +
+            '<canvas id="zuul-rl-executor-chart" class="zuul-rl-chart" width="660" height="170"></canvas>' +
+            '<div class="zuul-rl-legend">' +
+            '<span><span class="swatch" style="background:#06c"></span>RL window</span>' +
+            '<span><span class="swatch" style="background:#3e8635"></span>Free executors</span>' +
+            '</div>' +
+            '<button class="zuul-rl-explain-btn" type="button" data-chart="executor">Explain graph</button>' +
+            '<div class="zuul-rl-chart-explain" id="zuul-rl-explain-executor" style="display:none"></div>' +
+            '</div>' +
             '<div class="zuul-rl-efficiency-block" title="Advantage % over time (session total is in Session summary).">' +
-            '<div class="zuul-rl-chart-title">Advantage % over time</div>' +
+            '<div class="zuul-rl-chart-title">' +
+            '<span>Advantage % over time</span>' +
+            '<button class="zuul-rl-enlarge-btn" type="button" data-chart="efficiency" title="Enlarge chart">⤢</button></div>' +
             '<div class="zuul-rl-efficiency-formula">' +
             'Trend chart only — session advantage is in Session summary above</div>' +
-            '<canvas id="zuul-rl-efficiency-chart" width="440" height="56"></canvas>' +
+            '<canvas id="zuul-rl-efficiency-chart" style="width:100%" width="660" height="90"></canvas>' +
+            '<button class="zuul-rl-explain-btn" type="button" data-chart="efficiency">Explain graph</button>' +
+            '<div class="zuul-rl-chart-explain" id="zuul-rl-explain-efficiency" style="display:none"></div>' +
             '</div>' +
             '<div class="zuul-rl-chart-wrap">' +
             '<div class="zuul-rl-chart-title" title="Extra parallel slots RL kept vs TCP at each gate failure.">' +
-            'Extras per failure</div>' +
-            '<canvas id="zuul-rl-extra-chart" width="440" height="90"></canvas>' +
+            '<span>Extras per failure</span>' +
+            '<button class="zuul-rl-enlarge-btn" type="button" data-chart="extra" title="Enlarge chart">⤢</button></div>' +
+            '<canvas id="zuul-rl-extra-chart" style="width:100%" width="660" height="130"></canvas>' +
+            '<button class="zuul-rl-explain-btn" type="button" data-chart="extra">Explain graph</button>' +
+            '<div class="zuul-rl-chart-explain" id="zuul-rl-explain-extra" style="display:none"></div>' +
             '</div>' +
             '<div class="zuul-rl-chart-wrap">' +
             '<div class="zuul-rl-chart-title" title="Completed gate builds per minute across the full session.">' +
-            'Gate throughput (builds / min, full session)</div>' +
-            '<canvas id="zuul-rl-throughput-chart" class="zuul-rl-chart" width="440" height="110"></canvas>' +
+            '<span>Gate throughput (builds / min, full session)</span>' +
+            '<button class="zuul-rl-enlarge-btn" type="button" data-chart="throughput" title="Enlarge chart">⤢</button></div>' +
+            '<canvas id="zuul-rl-throughput-chart" class="zuul-rl-chart" width="660" height="160"></canvas>' +
+            '<button class="zuul-rl-explain-btn" type="button" data-chart="throughput">Explain graph</button>' +
+            '<div class="zuul-rl-chart-explain" id="zuul-rl-explain-throughput" style="display:none"></div>' +
             '</div>' +
             '<div id="zuul-rl-comparison" class="zuul-rl-compare-block" style="display:none"></div>') +
 
@@ -1909,14 +2664,28 @@
         if (runBtn) {
           runBtn.addEventListener('click', triggerDemo);
         }
-        var extendBtn = panel.querySelector('#zuul-rl-extend-btn');
-        if (extendBtn) {
-          extendBtn.addEventListener('click', triggerExtendDemo);
+        var stopBtn = panel.querySelector('#zuul-rl-stop-btn');
+        if (stopBtn) {
+          stopBtn.addEventListener('click', triggerStopDemo);
         }
         var minBtn = panel.querySelector('#zuul-rl-minimize-btn');
         if (minBtn) {
           minBtn.addEventListener('click', togglePanelMinimized);
         }
+        panel.querySelectorAll('.zuul-rl-enlarge-btn').forEach(
+          function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              openChartModal(btn.getAttribute('data-chart'));
+            });
+          });
+        panel.querySelectorAll('.zuul-rl-explain-btn').forEach(
+          function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              toggleChartExplain(panel, btn);
+            });
+          });
         ['#zuul-rl-total-changes', '#zuul-rl-gate-failures'].forEach(
           function (sel) {
             var inp = panel.querySelector(sel);
@@ -1935,47 +2704,65 @@
         return panel;
       }
 
-      function triggerExtendDemo() {
+      function triggerStopDemo() {
         var panel = ensureReportPanel();
-        var btn = panel.querySelector('#zuul-rl-extend-btn');
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = 'Extending\u2026';
+        var stopBtn = panel.querySelector('#zuul-rl-stop-btn');
+        var runBtn = panel.querySelector('#zuul-rl-run-btn');
+        var status = panel.querySelector('#zuul-rl-status');
+        if (stopBtn) {
+          stopBtn.disabled = true;
+          stopBtn.textContent = 'Stopping\u2026';
         }
-        fetch(CONTROL_BASE + '/extend-demo', {
+        if (runBtn) {
+          runBtn.disabled = true;
+          runBtn.textContent = 'Stopping...';
+        }
+        if (status) {
+          status.textContent = 'Stopping demo\u2026 clearing queues';
+          status.className = 'zuul-rl-status-line zuul-rl-status-running';
+        }
+        startDemoPolling();
+        renderDemoProgress({
+          phase: 'stopping',
+          stopping: true,
+          message: 'Stopping demo\u2026 clearing queues',
+          percent: 0,
+          running: true
+        });
+        fetch(CONTROL_BASE + '/stop-demo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batches: 1 })
+          body: '{}'
         })
           .then(function (resp) {
-            if (!resp.ok) {
-              throw new Error('extend-demo failed');
-            }
-            return resp.json();
+            return resp.json().then(function (data) {
+              if (!resp.ok) {
+                throw new Error((data && data.message) || 'stop-demo failed');
+              }
+              return data;
+            });
           })
           .then(function (data) {
-            if (btn) {
-              btn.disabled = false;
-              btn.textContent = 'Extend session';
-            }
-            var status = panel.querySelector('#zuul-rl-status');
             if (status) {
-              status.textContent = data.message ||
-                ('Extended by ' + (data.batches_added || 1) +
-                  ' batch(es) — in-flight builds continue.');
+              status.textContent = (data && data.message) ||
+                'Stopping demo\u2026 clearing queues';
               status.className = 'zuul-rl-status-line zuul-rl-status-running';
             }
             pollDemoProgress();
           })
-          .catch(function () {
-            if (btn) {
-              btn.disabled = false;
-              btn.textContent = 'Extend session';
+          .catch(function (err) {
+            if (stopBtn) {
+              stopBtn.disabled = false;
+              stopBtn.textContent = 'Stop demo';
             }
-            var status = panel.querySelector('#zuul-rl-status');
+            if (runBtn) {
+              runBtn.disabled = false;
+              runBtn.textContent = 'Run demo';
+            }
             if (status) {
-              status.textContent =
-                'Extend failed — is a continuous demo session running?';
+              status.textContent = (err && err.message) ?
+                err.message :
+                'Failed to stop demo \u2014 is rl-control running?';
               status.className = 'zuul-rl-status-line zuul-rl-status-error';
             }
           });
@@ -2063,13 +2850,12 @@
             }
             var failCard = panel.querySelector('#zuul-rl-hl-failures');
             if (failCard) {
-              failCard.textContent = '0/' + DEMO_EXPECTED_FAILURES;
+              failCard.textContent = '0';
             }
             renderDemoProgress({
               phase: data.phase || 'starting',
               message: data.message || 'Demo started',
               percent: 2,
-              extend_available: true,
               expected_failures: DEMO_EXPECTED_FAILURES,
               total_changes: data.total_changes
             });
@@ -2101,7 +2887,7 @@
         }
         var w = canvas.width;
         var h = canvas.height;
-        var pad = { top: 12, right: 10, bottom: 22, left: 32 };
+        var pad = { top: 12, right: 10, bottom: 22, left: 36 };
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = '#fafafa';
         ctx.fillRect(0, 0, w, h);
@@ -2119,12 +2905,17 @@
         if (!allY.length || n === 0) {
           ctx.fillStyle = '#6a6e73';
           ctx.font = '11px sans-serif';
-          ctx.fillText('Waiting for agent ticks\u2026', pad.left, h / 2);
+          ctx.fillText(
+            (options && options.emptyText) || 'Waiting for agent ticks\u2026',
+            pad.left, h / 2);
           return;
         }
 
         var minY = Math.min.apply(null, allY);
         var maxY = Math.max.apply(null, allY);
+        if (options && options.yMin != null && !isNaN(Number(options.yMin))) {
+          minY = Math.min(minY, Number(options.yMin));
+        }
         if (options && options.ylabel &&
             options.ylabel.indexOf('window') === 0) {
           minY = Math.max(1, minY - 1);
@@ -2147,10 +2938,11 @@
           return pad.top + plotH - ((v - minY) / (maxY - minY)) * plotH;
         };
 
+        var yTicks = 4;
         ctx.strokeStyle = '#d2d2d2';
         ctx.lineWidth = 1;
-        for (var g = 0; g <= 3; g++) {
-          var gy = pad.top + (g / 3) * plotH;
+        for (var g = 0; g <= yTicks; g++) {
+          var gy = pad.top + (g / yTicks) * plotH;
           ctx.beginPath();
           ctx.moveTo(pad.left, gy);
           ctx.lineTo(w - pad.right, gy);
@@ -2160,8 +2952,13 @@
         ctx.fillStyle = '#6a6e73';
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(Math.round(maxY), pad.left - 4, pad.top + 4);
-        ctx.fillText(Math.round(minY), pad.left - 4, pad.top + plotH);
+        for (var gl = 0; gl <= yTicks; gl++) {
+          var glY = pad.top + (gl / yTicks) * plotH;
+          var glVal = maxY - (gl / yTicks) * (maxY - minY);
+          var glBaseline = gl === 0 ? glY + 4 :
+            (gl === yTicks ? glY : glY + 3);
+          ctx.fillText(_axisLabel(glVal), pad.left - 4, glBaseline);
+        }
 
         if (options && options.timestamps && options.timestamps.length) {
           ctx.textAlign = 'center';
@@ -2172,6 +2969,14 @@
         }
 
         if (options && options.failures && options.timestamps) {
+          // Every failure always gets its dashed line — the visible line
+          // count must match the true total. Only the "#N" text label is
+          // skipped when it would collide with the previous one, so dense
+          // clusters don't render as illegible overlapping digits; the
+          // "Recent failures" list below always has the full detail for
+          // every failure regardless of chart density.
+          var lastLabelX = -Infinity;
+          var MIN_LABEL_GAP = 16;
           options.failures.forEach(function (fail) {
             var idx = 0;
             var best = Infinity;
@@ -2191,13 +2996,15 @@
             ctx.lineTo(fx, pad.top + plotH);
             ctx.stroke();
             ctx.setLineDash([]);
-            if (fail.session_index != null) {
+            var canLabel = (fx - lastLabelX) >= MIN_LABEL_GAP;
+            if (fail.session_index != null && canLabel) {
               ctx.fillStyle = '#c9190b';
               ctx.font = 'bold 9px sans-serif';
               ctx.textAlign = 'center';
               ctx.fillText('#' + fail.session_index, fx, pad.top + 10);
+              lastLabelX = fx;
             }
-            if (options.showChangeIds && fail.change) {
+            if (options.showChangeIds && fail.change && canLabel) {
               var cid = String(fail.change);
               // Prefer bare change number when "project N,ps"
               var m = cid.match(/(\d+)(?:,\d+)?$/);
@@ -2439,14 +3246,22 @@
           .then(function (st) {
             var link = panel.querySelector('#zuul-rl-report-link');
             var status = panel.querySelector('#zuul-rl-status');
-            var btn = panel.querySelector('#zuul-rl-run-btn');
-            if (btn) {
-              btn.disabled = !!st.running;
-              btn.textContent = st.running ? 'Running...' : 'Run demo';
-            }
+            var prog = st.demo_progress || {};
+            var stopping = !!(st.running && (
+              prog.stopping || prog.phase === 'stopping'));
+            syncDemoControlButtons(panel, prog, !!st.running);
             if (status) {
               status.className = 'zuul-rl-status-line';
-              if (st.running || demoRunning) {
+              if (stopping) {
+                if (!demoRunning) {
+                  startDemoPolling();
+                }
+                demoRunning = true;
+                renderDemoProgress(prog);
+                status.textContent = prog.message ||
+                  'Stopping demo\u2026 clearing queues';
+                status.className += ' zuul-rl-status-running';
+              } else if (st.running || demoRunning) {
                 if (!demoRunning) {
                   startDemoPolling();
                 }
@@ -2458,6 +3273,9 @@
                     'Demo scenario running \u2014 see progress above.';
                   status.className += ' zuul-rl-status-running';
                 }
+              } else if (prog.phase === 'cancelled') {
+                status.textContent = prog.message ||
+                  'Demo stopped. Click Run demo to start.';
               } else if (st.last_error) {
                 status.textContent = 'Last demo run failed: ' + st.last_error;
                 status.className += ' zuul-rl-status-error';

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>RL vs TCP Run Report</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; }
+table { border-collapse: collapse; margin: 1rem 0; }
+th, td { border: 1px solid #ccc; padding: 0.4rem 0.7rem; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+th { background: #f4f4f4; }
+</style></head><body>
+<h1>RL vs TCP Window Comparison</h1>
+<table>
+<tr><th>Scenario</th><th>RL window</th><th>TCP window</th><th>RL−TCP</th>
+<th>Throughput/min</th><th>Builds</th><th>vs baseline</th></tr>
+<tr><td>baseline</td><td>20.0</td><td>20.0</td><td>+0.0</td><td>0.0</td><td>0</td><td></td></tr>
+<tr><td>after-burst</td><td>0.0</td><td>0.0</td><td>+0.0</td><td>0.0</td><td>0</td><td></td></tr>
+</table>
+<h2>Throughput Change</h2>
+<img src="throughput_graph.png" alt="throughput graph" style="max-width:100%"/>
+<h2>RL vs TCP Window Delta</h2>
+<img src="window_delta_graph.png" alt="window delta graph" style="max-width:100%"/>
+</body></html>

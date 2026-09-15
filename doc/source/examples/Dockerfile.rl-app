@@ -6,15 +6,23 @@
 #   docker build -f doc/source/examples/Dockerfile.rl-app --target bootstrap  -t zuul-rl-bootstrap .
 #   docker build -f doc/source/examples/Dockerfile.rl-app --target control    -t zuul-rl-control .
 
-# --- Zuul scheduler with RL patches, policy table, active config ---
+# --- Zuul scheduler with RL patches, trained PPO policy, active config ---
 FROM quay.io/zuul-ci/zuul-scheduler AS scheduler
+# Pure-PPO live serving (zuul/rl_window.py _choose_action) loads a real
+# Stable-Baselines3 PPO checkpoint at runtime, which needs torch + sb3 in
+# the scheduler image (the base image ships neither).
+RUN pip install --no-cache-dir \
+        --trusted-host pypi.org \
+        --trusted-host files.pythonhosted.org \
+        --trusted-host pypi.python.org \
+        stable-baselines3
 COPY zuul/rl_window.py /usr/local/lib/python3.11/site-packages/zuul/rl_window.py
 COPY zuul/scheduler.py /usr/local/lib/python3.11/site-packages/zuul/scheduler.py
 COPY zuul/manager/__init__.py /usr/local/lib/python3.11/site-packages/zuul/manager/__init__.py
 COPY research/models /var/lib/zuul/models
 COPY doc/source/examples/etc_zuul /etc/zuul
 ENV RL_WINDOW_AUDIT_PATH=/var/lib/zuul/rl_window_audit.jsonl
-ENV RL_WINDOW_POLICY_PATH=/var/lib/zuul/models/ppo_gate_window_table.json
+ENV RL_WINDOW_POLICY_PATH=/var/lib/zuul/models/ppo_gate_window.zip
 ENV RL_DEFAULT_INITIAL_WINDOW=8
 
 # --- Zuul web: inject RL overlay into stock index.html (keeps correct JS bundle) ---

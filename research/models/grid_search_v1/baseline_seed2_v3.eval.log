@@ -1,0 +1,11 @@
+tcp_heuristic   mean_reward=-56.1259  stdev=84.9021  n=500
+tcp_genuine     mean_reward=-24.0331  stdev=43.5598  n=500
+fixed_20        mean_reward=-6.4018  stdev=22.6405  n=500
+random          mean_reward=-15.2981  stdev=38.1637  n=500
+ppo             mean_reward=-3.3080  stdev=7.0108  n=500
+
+PPO vs every other baseline (paired, same episode draws):
+  vs tcp_heuristic   mean_diff=+52.8178 win_rate=56.0%  MWU p=5.568e-40 (SIGNIFICANT)
+  vs tcp_genuine     mean_diff=+20.7250 win_rate=79.2%  MWU p=5.131e-32 (SIGNIFICANT)
+  vs fixed_20        mean_diff=+3.0938 win_rate=37.2%  MWU p=0.09364 (not significant)
+  vs random          mean_diff=+11.9900 win_rate=59.0%  MWU p=0.0004137 (SIGNIFICANT)

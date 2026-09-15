@@ -70,6 +70,39 @@ mode=active
 policy_path=/var/lib/zuul/models/ppo_gate_window.zip
 ```
 
+### 4. Pure PPO live serving
+
+`zuul/rl_window.py`'s `_choose_action()` gives a loaded PPO network top
+priority and applies its output **as-is**: no kNN policy-table lookup, no
+rule-based guardrails (`hold_on_failure_burst`, `hold_on_low_executors`,
+`ramp_on_success_streak`), and no artificial "window can never fall below
+the TCP shadow" floor. Only the pipeline's `window-floor`/`window-ceiling`
+bounds (a physical validity clamp, not a heuristic) and, for agent-sourced
+decisions, the executor-capacity clamp still apply.
+
+The kNN policy table (`ppo_gate_window_table.json`, built by
+`generate_policy_table.py` without any ML dependencies) and the heuristic
+guardrails remain in the code as an explicit **fallback path**, used only
+when `policy_path` is unset or fails to load — e.g. no `.zip` checkpoint
+is present, or the runtime lacks `stable-baselines3`/`torch`. This keeps
+the dependency-free demo working, while the default `docker-compose.rl-
+app.yaml` / `Dockerfile.rl-app` build now installs `stable-baselines3`
+into the scheduler image and points `RL_WINDOW_POLICY_PATH` at
+`ppo_gate_window.zip`, so the turnkey demo runs pure PPO by default.
+`docker-compose.research-mount.yaml` (bind-mount, no rebuild) intentionally
+stays on the JSON table, since the stock `zuul-scheduler` image it mounts
+into has no torch/sb3 installed.
+
+To retrain the checkpoint used by the live scheduler:
+
+```bash
+cd research
+python -m training.train_ppo --steps 200000 --seed 0 --output models/ppo_gate_window.zip
+```
+
+then rebuild the scheduler image (`docker compose ... up -d --build scheduler`)
+so the new checkpoint is baked in.
+
 ### 5. Compare RL vs TCP after a run
 
 ```bash

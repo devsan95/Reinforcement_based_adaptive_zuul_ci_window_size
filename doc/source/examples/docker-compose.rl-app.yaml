@@ -32,7 +32,13 @@ services:
     image: zuul-rl-app-scheduler:local
     environment:
       RL_WINDOW_AUDIT_PATH: /var/lib/zuul/rl_window_audit.jsonl
-      RL_WINDOW_POLICY_PATH: /var/lib/zuul/models/ppo_gate_window_table.json
+      # Pure PPO live serving: a trained Stable-Baselines3 checkpoint,
+      # applied via direct model.predict() with no kNN table, no
+      # heuristic guardrails, and no artificial TCP-shadow floor (see
+      # zuul/rl_window.py _choose_action). Retrain with
+      # `python -m training.train_ppo` from research/ and rebuild this
+      # image to update the checkpoint.
+      RL_WINDOW_POLICY_PATH: /var/lib/zuul/models/ppo_gate_window.zip
       # Small baseline: TCP collapses 8→4→2 on failures while RL holds ~8,
       # so a 10-deep queue shows "TCP runs 2, RL runs 8" immediately.
       RL_DEFAULT_INITIAL_WINDOW: "8"
@@ -104,12 +110,18 @@ services:
       # jobs take ~6s+overhead, so ~10 arrivals / 20s outpace the ~8-wide
       # window and backlog builds → in-flight RL vs TCP diverges visibly.
       DEMO_BATCH_INTERVAL_SEC: "20"
-      DEMO_DURATION_SEC: "300"
-      DEMO_FAIL_PER_BATCH: "5"
-      DEMO_PASS_PER_BATCH: "5"
+      DEMO_DURATION_SEC: "1200"
+      # 20% fail rate (was 50%): a failure every ~2 changes left almost no
+      # gap between conflicts for the window to move in before the next
+      # one hit. This spaces failures out so a handful of real window
+      # ups/downs can happen between conflicts.
+      DEMO_FAIL_PER_BATCH: "2"
+      DEMO_PASS_PER_BATCH: "8"
       DEMO_GATE_WAIT_SEC: "120"
-      # 300s / 20s interval = 15 batches × 5 fails
-      DEMO_EXPECTED_FAILURES: "75"
+      # Approximate target, scaled with DEMO_FAIL_PER_BATCH above; actual
+      # sessions usually end via drain/completion before the full
+      # DEMO_DURATION_SEC, so this is a rough label, not a hard count.
+      DEMO_EXPECTED_FAILURES: "30"
       DEMO_AUDIT_WAIT: "3"
       DEMO_RESET_GRACE_SEC: "1"
       DEMO_QUEUE_CLEAR_TIMEOUT: "30"

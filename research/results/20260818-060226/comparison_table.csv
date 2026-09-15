@@ -1,0 +1,3 @@
+scenario,rl_window,tcp_window,rl_minus_tcp,throughput_per_min,completed_builds,duration_min,improvement_vs_baseline_pct
+baseline,8.0,2.48,5.52,0.424,3,7.08,
+after-burst,0.0,0.0,0.0,0.0,0,inf,-100.0

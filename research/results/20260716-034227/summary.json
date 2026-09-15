@@ -1,0 +1,24 @@
+{
+  "scenarios": [
+    {
+      "name": "baseline",
+      "rl_window": 19.7,
+      "tcp_window": 13.82,
+      "window_delta": 5.88,
+      "throughput_per_min": 1.066,
+      "completed_builds": 6,
+      "duration_min": 5.63,
+      "improvement_pct": null
+    },
+    {
+      "name": "after-burst",
+      "rl_window": 0.0,
+      "tcp_window": 0.0,
+      "window_delta": 0.0,
+      "throughput_per_min": 0.0,
+      "completed_builds": 0,
+      "duration_min": Infinity,
+      "improvement_pct": -100.0
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+=== SHADOW EVAL START Sat Sep 12 13:59:29 IST 2026 : 1 cycles ===
+--- Cycle 1/1: POST /run-demo Sat Sep 12 13:59:30 IST 2026 ---
+--- Cycle 1/1 done Sat Sep 12 14:25:39 IST 2026 ---
+=== SHADOW EVAL END Sat Sep 12 14:25:45 IST 2026 ===
+invalid output path: directory "C:\\c\\Users\\vagga\\Desktop\\zuul-community\\research\\models\\shadow_eval_v1" does not exist
+Audit log snapshot saved: /c/Users/vagga/Desktop/zuul-community/research/models/shadow_eval_v1/rl_window_audit_final.jsonl
+wc: /c/Users/vagga/Desktop/zuul-community/research/models/shadow_eval_v1/rl_window_audit_final.jsonl: No such file or directory

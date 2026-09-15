@@ -48,6 +48,11 @@ THROUGHPUT_WINDOW_SEC = float(
 # Small demo baseline: a 10-change batch immediately exceeds the window so
 # min(queue, window) differentiates RL vs TCP as soon as TCP shrinks.
 DEFAULT_INITIAL_WINDOW = int(os.environ.get("RL_DEFAULT_INITIAL_WINDOW", "8"))
+# Matches the live pipeline's window-ceiling (zuul.d/gate-pipeline.yaml) —
+# needed to reconstruct an approximate historical queue depth from the
+# audited queue_saturation state feature (queue_saturation = queue_depth /
+# (2 * ceiling)), since ticks don't log the raw queue depth directly.
+GATE_WINDOW_CEILING = int(os.environ.get("RL_WINDOW_CEILING", "25"))
 DEFAULT_GATE_JOB_DURATION_SEC = float(
     os.environ.get("RL_DEFAULT_GATE_JOB_DURATION_SEC", "1.0"))
 DEMO_CHANGE_COUNT = int(os.environ.get("DEMO_CHANGE_COUNT", "100"))
@@ -60,8 +65,12 @@ DEMO_MAX_BATCH_SIZE = int(os.environ.get("DEMO_MAX_BATCH_SIZE", "20"))
 DEMO_BATCH_INTERVAL_SEC = float(
     os.environ.get("DEMO_BATCH_INTERVAL_SEC", "30"))
 DEMO_DURATION_SEC = float(os.environ.get("DEMO_DURATION_SEC", "300"))
-DEMO_FAIL_PER_BATCH = int(os.environ.get("DEMO_FAIL_PER_BATCH", "5"))
-DEMO_PASS_PER_BATCH = int(os.environ.get("DEMO_PASS_PER_BATCH", "5"))
+# A 50/50 fail rate left almost no gap between conflicts for the window to
+# move in before the next one hit. 20% spaces failures out so a handful of
+# real window ups/downs can happen between conflicts, closer to a real
+# pipeline's cadence, while still guaranteeing regular failures occur.
+DEMO_FAIL_PER_BATCH = int(os.environ.get("DEMO_FAIL_PER_BATCH", "2"))
+DEMO_PASS_PER_BATCH = int(os.environ.get("DEMO_PASS_PER_BATCH", "8"))
 DEMO_QUEUE_CLEAR_TIMEOUT = float(
     os.environ.get("DEMO_QUEUE_CLEAR_TIMEOUT", "30"))
 DEMO_QUEUE_CLEAR_TIMEOUT_PER_ITEM = float(
@@ -74,6 +83,10 @@ DEMO_QUEUE_PROCESSING_WAIT = float(
     os.environ.get("DEMO_QUEUE_PROCESSING_WAIT", "0.75"))
 DEMO_QUEUE_STUCK_ROUNDS = int(
     os.environ.get("DEMO_QUEUE_STUCK_ROUNDS", "4"))
+# After the max wait, allow this many leftover items (in-flight finishing)
+# rather than failing the whole demo. Large leftovers still fail.
+DEMO_QUEUE_CLEAR_STRAY_LIMIT = int(
+    os.environ.get("DEMO_QUEUE_CLEAR_STRAY_LIMIT", "2"))
 DEMO_SCHEDULER_PURGE_WAIT = float(
     os.environ.get("DEMO_SCHEDULER_PURGE_WAIT", "1.5"))
 DEMO_AUDIT_WAIT = float(os.environ.get("DEMO_AUDIT_WAIT", "3"))
@@ -96,6 +109,11 @@ DEMO_MAX_TOTAL_CHANGES = int(os.environ.get("DEMO_MAX_TOTAL_CHANGES", "500"))
 DEMO_MAX_GATE_FAILURES = int(os.environ.get("DEMO_MAX_GATE_FAILURES", "500"))
 DEMO_GATE_BUILD_POLL_SEC = float(
     os.environ.get("DEMO_GATE_BUILD_POLL_SEC", "5"))
+# Catch-up after duration/change-cap until N completed gate job FAILURES.
+DEMO_FAIL_CATCH_UP_MAX_ROUNDS = int(
+    os.environ.get("DEMO_FAIL_CATCH_UP_MAX_ROUNDS", "12"))
+DEMO_FAIL_CATCH_UP_WAIT_SEC = float(
+    os.environ.get("DEMO_FAIL_CATCH_UP_WAIT_SEC", "90"))
 
 
 def _effective_demo_gate_wait_sec() -> float:
@@ -137,9 +155,13 @@ DEMO_PHASES = (
     "waiting_gate_cycles",
     "generating_report",
     "publishing",
+    "stopping",
+    "cancelled",
     "done",
     "error",
 )
+
+STOPPING_MESSAGE = "Stopping demo\u2026 clearing queues"
 
 
 def _planned_batches(duration_sec: float = DEMO_DURATION_SEC) -> int:
@@ -191,7 +213,8 @@ def parse_run_demo_params(
 
     Accepted keys:
       total_changes — stop after this many submitted changes
-      gate_failures / fail_count — stamp this many fails across the session
+      gate_failures / fail_count — complete this many gate job FAILURES
+        (stamped should_fail / research-gate-job), not merge conflicts
 
     Empty body keeps duration-based defaults. Returns (params, error).
     """
@@ -279,6 +302,92 @@ def fails_for_duration_batch(
     return max(lo, min(batch_size, remaining_fails, prop))
 
 
+def fail_stamps_needed(
+        target_fails: Optional[int],
+        observed: int,
+        stamped: int,
+        *,
+        compensate: bool = False) -> int:
+    """How many more should_fail stamps to submit to reach N job FAILURES.
+
+    Stamps that entered gate but have not finished yet (stamped − observed)
+    are treated as in-flight: do not stamp more until those can complete,
+    unless compensate=True (caller already waited and some stamps never
+    landed — check timeout, skipped Depends-On, etc.).
+    """
+    if target_fails is None:
+        return 0
+    target = max(0, int(target_fails))
+    observed = max(0, int(observed))
+    stamped = max(0, int(stamped))
+    remaining = max(0, target - observed)
+    if remaining <= 0:
+        return 0
+    if compensate:
+        return remaining
+    inflight = max(0, stamped - observed)
+    return max(0, remaining - inflight)
+
+
+def fail_budget_met(target_fails: Optional[int], observed: int) -> bool:
+    """True when there is no exact target, or observed gate FAILURES ≥ N."""
+    if target_fails is None:
+        return True
+    return max(0, int(observed)) >= max(0, int(target_fails))
+
+
+def traffic_loop_should_continue(
+        *,
+        stop: bool,
+        target_total: Optional[int],
+        target_fails: Optional[int],
+        submitted: int,
+        observed: int,
+        now: float,
+        deadline: float,
+        catch_up_rounds: int,
+        max_catch_up: int,
+        extend_pending: int = 0,
+) -> Tuple[bool, str]:
+    """Decide whether the continuous traffic loop should submit another batch.
+
+    Fail budget is observed completed gate job FAILURES, not stamps.
+    Duration / change-count must not stop the loop while the fail budget
+    is still open (until catch-up rounds are exhausted).
+    """
+    if stop:
+        return False, "stop"
+    # Exact N>0 met: stop unless more pass changes are needed for total.
+    if (
+        target_fails is not None
+        and int(target_fails) > 0
+        and observed >= int(target_fails)
+    ):
+        if target_total is None or submitted >= int(target_total):
+            return False, "fail_budget_met"
+        if now >= deadline and int(extend_pending or 0) <= 0:
+            return False, "fail_budget_met"
+        return True, "pass_fill"
+    if target_total is not None and submitted >= int(target_total):
+        if target_fails is None or int(target_fails) <= 0 or (
+                observed >= int(target_fails)):
+            return False, "change_cap"
+        if catch_up_rounds >= max_catch_up:
+            return False, "catch_up_cap"
+        return True, "fail_catch_up"
+    if now >= deadline and int(extend_pending or 0) <= 0:
+        if (
+            target_fails is not None
+            and int(target_fails) > 0
+            and observed < int(target_fails)
+            and catch_up_rounds < max_catch_up
+        ):
+            return True, "fail_catch_up_deadline"
+        return False, "deadline"
+    return True, "run"
+
+
+
 def downsample_keep_span(items: Sequence, max_points: int) -> List:
     """Uniformly sample across the full series, always keeping first + last."""
     if max_points <= 0 or len(items) <= max_points:
@@ -329,6 +438,17 @@ def _session_expected_failures() -> int:
         return DEMO_EXPECTED_FAILURES
 
 
+def _session_gate_failures_target() -> Optional[int]:
+    with LOCK:
+        value = STATE.get("demo_gate_failures")
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _demo_progress_idle() -> dict:
     planned = _planned_batches()
     return {
@@ -350,6 +470,8 @@ def _demo_progress_idle() -> dict:
         "batch_current": 0,
         "batches_plan_tip": _batches_plan_tip(planned),
         "extend_available": False,
+        "stop_available": False,
+        "stopping": False,
         "traffic_active": False,
         "time_remaining_s": DEMO_DURATION_SEC,
         "fail_per_batch": DEMO_FAIL_PER_BATCH,
@@ -376,6 +498,9 @@ STATE: Dict[str, object] = {
     "demo_progress": _demo_progress_idle(),
     # Continuous traffic control (extend does not cancel in-flight builds).
     "traffic_stop": False,
+    "stop_requested": False,
+    "stopping": False,
+    "active_demo_id": None,
     "extend_batches": 0,
     "traffic_deadline": None,
     "batches_completed": 0,
@@ -437,8 +562,38 @@ _BUILDS_CACHE: Dict[str, object] = {"ts": 0.0, "data": []}
 _LIVE_METRICS_CACHE: Dict[str, object] = {"ts": 0.0, "data": None}
 
 
+def _demo_stop_requested() -> bool:
+    with LOCK:
+        return bool(STATE.get("stop_requested") or STATE.get("stopping"))
+
+
+def _owns_demo(demo_id: Optional[str]) -> bool:
+    with LOCK:
+        return demo_id is not None and STATE.get("active_demo_id") == demo_id
+
+
+def _demo_thread_should_exit(demo_id: str) -> bool:
+    """True when this worker no longer owns the session (stop or superseded)."""
+    with LOCK:
+        if STATE.get("active_demo_id") != demo_id:
+            return True
+        if STATE.get("stop_requested") or STATE.get("stopping"):
+            return True
+        return False
+
+
 def _set_demo_progress(**kwargs) -> dict:
     with LOCK:
+        aborting = bool(STATE.get("stop_requested") or STATE.get("stopping"))
+        new_phase = kwargs.get("phase")
+        if aborting and new_phase not in ("stopping", "cancelled"):
+            return dict(STATE.get("demo_progress") or _demo_progress_idle())
+        if (
+            not STATE.get("running")
+            and not aborting
+            and new_phase not in ("done", "error", "cancelled")
+        ):
+            return dict(STATE.get("demo_progress") or _demo_progress_idle())
         prog = dict(STATE.get("demo_progress") or _demo_progress_idle())
         prog.update(kwargs)
         started = prog.get("started_at")
@@ -459,9 +614,12 @@ class _PhaseHeartbeat:
     restart) is in flight, so the UI never looks frozen.
     """
 
-    def __init__(self, message_fn, interval: float = 3.0, **progress_kwargs):
+    def __init__(
+            self, message_fn, interval: float = 3.0, *,
+            demo_id: Optional[str] = None, **progress_kwargs):
         self._message_fn = message_fn
         self._interval = interval
+        self._demo_id = demo_id
         self._progress_kwargs = progress_kwargs
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -480,6 +638,10 @@ class _PhaseHeartbeat:
 
     def _run(self):
         while not self._stop.wait(self._interval):
+            if self._demo_id is not None and not _owns_demo(self._demo_id):
+                continue
+            if _demo_stop_requested():
+                continue
             elapsed = time.time() - self._started_at
             try:
                 message = self._message_fn(elapsed)
@@ -500,7 +662,17 @@ def _demo_progress_snapshot() -> dict:
         started = prog.get("started_at")
         if started:
             prog["elapsed_s"] = round(time.time() - float(started), 1)
-        return prog
+        stopping = bool(STATE.get("stopping") or STATE.get("stop_requested"))
+        running = bool(STATE["running"])
+        prog["stopping"] = stopping
+        prog["stop_available"] = running and not stopping
+    # Always present, regardless of phase: failures_so_far is the narrower
+    # job-only fail-budget count (drives traffic pacing, left untouched);
+    # cycle_failures_so_far additionally includes merge conflicts and other
+    # non-job reasons a cycle can fail — what actually drives window
+    # shrinks, so it can exceed failures_so_far.
+    prog["cycle_failures_so_far"] = _live_cycle_failure_count()
+    return prog
 
 
 def _audit_contains_demo_reset(
@@ -583,6 +755,8 @@ def _wait_for_demo_reset(
 
     while time.time() < deadline:
         now = time.time()
+        if _demo_stop_requested():
+            return
         if _audit_contains_demo_reset(session_start):
             return
         if _windows_at_baseline():
@@ -868,6 +1042,8 @@ def _ensure_executor_ready(*, update_progress: bool = False) -> None:
     start = time.time()
     deadline = start + 90
     while time.time() < deadline:
+        if _demo_stop_requested():
+            return
         if _executor_is_running() and _component_is_running("launcher"):
             return
         if update_progress:
@@ -1177,27 +1353,75 @@ def _all_queue_item_count(status: dict) -> int:
     return sum(1 for _ in _iter_all_queue_items(status))
 
 
+def _queue_clear_rounds_needed(item_count: int, head_count: int) -> int:
+    """REST rounds to drain a backlog with tail-first dequeue.
+
+    Dependent pipelines expose one tail per head group per round, so a long
+    chain of N items needs N rounds even when head_count is 1. Independent
+    pipelines (check) are worker-limited HTTP batches of all live heads.
+    """
+    items = max(int(item_count), 0)
+    if items <= 0 and int(head_count) <= 0:
+        return 0
+    items = max(items, int(head_count), 1)
+    heads = max(int(head_count), 1)
+    workers = max(DEMO_DEQUEUE_WORKERS, 1)
+    chain_rounds = max(1, math.ceil(items / heads))
+    http_rounds = max(1, math.ceil(items / workers))
+    return max(chain_rounds, http_rounds)
+
+
 def _effective_queue_clear_timeout(item_count: int, head_count: int) -> float:
-    """Scale clear timeout for large backlogs and async dequeue processing."""
+    """Scale clear timeout with remaining depth, not just parallel heads.
+
+    Previous formula used ceil(heads/workers) rounds, so a 300-item check
+    leftover plus a dependent gate chain got ~30s (the floor) and aborted
+    with hundreds still queued.
+    """
     if item_count <= 0 and head_count <= 0:
         return DEMO_QUEUE_CLEAR_TIMEOUT
-    items = max(item_count, head_count)
-    heads = max(head_count, 1)
-    workers = max(DEMO_DEQUEUE_WORKERS, 1)
-    # One REST round dequeues at most one tail per head group.
-    rounds = max(1, (heads + workers - 1) // workers)
+    items = max(int(item_count), int(head_count), 1)
+    rounds = _queue_clear_rounds_needed(item_count, head_count)
     per_round = (
         DEMO_QUEUE_CLEAR_TIMEOUT_PER_ITEM
         + DEMO_QUEUE_PROCESSING_WAIT
         + DEMO_QUEUE_POLL_INTERVAL
     )
     estimated = rounds * per_round
-    # Large saturated backlogs need extra wall time for scheduler purge + ZK.
-    estimated += min(120.0, items * 0.08)
+    # Scheduler purge + ZK + REST retries for large leftovers from prior demos.
+    estimated += max(DEMO_SCHEDULER_PURGE_WAIT * 4, 8.0)
+    estimated += min(180.0, items * 0.25)
     return min(
         DEMO_QUEUE_CLEAR_MAX_TIMEOUT,
         max(DEMO_QUEUE_CLEAR_TIMEOUT, estimated + 15.0),
     )
+
+
+def _extend_clear_deadline(
+        start: float,
+        deadline: float,
+        item_count: int,
+        head_count: int) -> float:
+    """Grow the clear deadline while a backlog remains, capped at MAX."""
+    if item_count <= 0:
+        return deadline
+    needed = _effective_queue_clear_timeout(item_count, head_count)
+    proposed = max(deadline, time.time() + needed * 0.5, start + needed)
+    return min(start + DEMO_QUEUE_CLEAR_MAX_TIMEOUT, proposed)
+
+
+def _clear_processing_wait(item_count: int) -> float:
+    """Shorter pause between dequeue rounds when the backlog is large."""
+    if item_count >= 50:
+        return min(DEMO_QUEUE_PROCESSING_WAIT, 0.2)
+    if item_count >= 10:
+        return min(DEMO_QUEUE_PROCESSING_WAIT, 0.4)
+    return DEMO_QUEUE_PROCESSING_WAIT
+
+
+def _residual_queue_ok(item_count: int) -> bool:
+    """True when leftover depth is small enough to start the demo anyway."""
+    return 0 < int(item_count) <= DEMO_QUEUE_CLEAR_STRAY_LIMIT
 
 
 def _format_queue_change_label(project: str, change: str) -> str:
@@ -1325,8 +1549,9 @@ def _iter_dequeue_targets(status: dict):
 
     REST dequeue only succeeds reliably for tail items in a dependent chain;
     dequeuing every dependent in parallel causes silent scheduler failures.
+    Check tails are yielded before gate so leftovers cannot promote mid-clear.
     """
-    targets: List[Tuple[str, str, str]] = []
+    by_pipeline: Dict[str, List[Tuple[str, str, str]]] = {}
     for pipeline in status.get("pipelines", []):
         pipeline_name = pipeline.get("name")
         if not pipeline_name:
@@ -1339,9 +1564,19 @@ def _iter_dequeue_targets(status: dict):
                 if parsed is None:
                     continue
                 project, change = parsed
-                targets.append((pipeline_name, project, change))
-    for target in reversed(targets):
-        yield target
+                by_pipeline.setdefault(pipeline_name, []).append(
+                    (pipeline_name, project, change))
+
+    def _pipeline_priority(name: str) -> int:
+        if name == "check":
+            return 0
+        if name == DEMO_PIPELINE:
+            return 1
+        return 2
+
+    for name in sorted(by_pipeline, key=_pipeline_priority):
+        for target in reversed(by_pipeline[name]):
+            yield target
 
 
 def _dequeue_change(
@@ -1490,10 +1725,17 @@ def _audit_purge_removed_since(session_start: float) -> Optional[int]:
 
 def _wait_for_scheduler_purge(
         session_start: float,
-        timeout: float = DEMO_SCHEDULER_PURGE_WAIT) -> int:
+        timeout: float = DEMO_SCHEDULER_PURGE_WAIT,
+        should_stop=None) -> int:
     """Wait for scheduler purge audit after a reset/purge request."""
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if should_stop:
+            try:
+                if should_stop():
+                    return _audit_purge_removed_since(session_start) or 0
+            except Exception:
+                pass
         removed = _audit_purge_removed_since(session_start)
         if removed is not None:
             return removed
@@ -1515,58 +1757,59 @@ def wait_for_empty_queues(
         initial_scheduler_wait: float = DEMO_SCHEDULER_PURGE_WAIT,
         request_scheduler_purge=None,
         require_gate_only: bool = False,
+        should_stop=None,
 ) -> Tuple[bool, int, float]:
     """Poll until queues are empty, dequeuing stragglers.
 
-    When require_gate_only is True (RL demo), success requires an empty gate
-    pipeline only; check stragglers are dequeued best-effort but do not fail
-    the demo. Check jobs are required for Verified+1 before gate promotion —
-    do not dequeue check during traffic submission.
+    Demo start should pass require_gate_only=False so both check and gate
+    drain; leftovers in check promote into gate and re-fill it. When
+    require_gate_only is True, success still requires an empty gate, but
+    check is dequeued/purged as well. Do not dequeue check during traffic
+    submission — only before the demo starts.
+
+    should_stop, if callable and true, aborts early (used when the user
+    hits Stop during the demo's initial queue clear).
     """
     start = time.time()
     purge_session_start: Optional[float] = None
     purge_pending_deadline = 0.0
 
+    def _stop_now() -> bool:
+        try:
+            return bool(should_stop and should_stop())
+        except Exception:
+            return False
+
+    if _stop_now():
+        return False, 0, 0.0
+
     status = _fetch_tenant_status(api_url)
-    initial_items = _all_queue_item_count(status)
-    initial_heads = _all_queue_depth(status)
-    if require_gate_only:
-        initial_items = _gate_queue_item_count(status)
-        initial_heads = _gate_queue_depth(status)
+    all_items = _all_queue_item_count(status)
+    all_heads = _all_queue_depth(status)
+    initial_items = (
+        _gate_queue_item_count(status) if require_gate_only else all_items)
+    initial_heads = (
+        _gate_queue_depth(status) if require_gate_only else all_heads)
     if timeout is None:
-        timeout = _effective_queue_clear_timeout(initial_items, initial_heads)
+        # Always scale from the full leftover (check+gate), even if success
+        # is later judged on gate only.
+        timeout = _effective_queue_clear_timeout(all_items, all_heads)
     deadline = start + timeout
     items_at_round_start = initial_items
     total_cleared = 0
     stuck_rounds = 0
     log.info(
-        "queue_clear_start items=%d heads=%d timeout=%.1fs gate_only=%s",
-        initial_items, initial_heads, timeout, require_gate_only)
+        "queue_clear_start items=%d heads=%d all_items=%d all_heads=%d "
+        "timeout=%.1fs gate_only=%s",
+        initial_items, initial_heads, all_items, all_heads,
+        timeout, require_gate_only)
 
     if initial_scheduler_wait > 0:
-        time.sleep(initial_scheduler_wait)
-
-    if request_scheduler_purge is not None and initial_items > 0:
-        purge_session_start = request_scheduler_purge()
-        purge_pending_deadline = time.time() + max(
-            DEMO_SCHEDULER_PURGE_WAIT * 4, 8.0)
-        purged = _wait_for_scheduler_purge(
-            purge_session_start,
-            timeout=max(DEMO_SCHEDULER_PURGE_WAIT * 3, 6.0))
-        log.info("scheduler purge removed %d item(s)", purged)
-        time.sleep(DEMO_QUEUE_PROCESSING_WAIT)
-        status = _fetch_tenant_status(api_url)
-        item_count = (
-            _gate_queue_item_count(status) if require_gate_only
-            else _all_queue_item_count(status))
-        if item_count < items_at_round_start:
-            items_at_round_start = item_count
-
-    def _dequeue_visible_tails(status: dict) -> int:
-        items = list(_iter_dequeue_targets(status))
-        if not items:
-            return 0
-        return _batch_dequeue_items(api_url, items, wait_for_results=True)
+        wait_end = time.time() + initial_scheduler_wait
+        while time.time() < wait_end:
+            if _stop_now():
+                return False, 0, time.time() - start
+            time.sleep(min(0.2, max(0.0, wait_end - time.time())))
 
     def _current_item_count(status: dict) -> int:
         if require_gate_only:
@@ -1584,24 +1827,90 @@ def wait_for_empty_queues(
             and _all_queue_item_count(status) == 0
         )
 
+    def _finish_success(status: dict) -> Tuple[bool, int, float]:
+        if require_gate_only:
+            clear_check_queue_backlog(api_url, status)
+        elapsed = time.time() - start
+        item_count = _current_item_count(status)
+        return True, max(0, initial_items - item_count), elapsed
+
+    def _dequeue_visible_tails(status: dict) -> int:
+        items = list(_iter_dequeue_targets(status))
+        if not items:
+            return 0
+        chunk = max(DEMO_DEQUEUE_WORKERS * 2, 32)
+        removed = 0
+        for offset in range(0, len(items), chunk):
+            if time.time() >= deadline or _stop_now():
+                break
+            removed += _batch_dequeue_items(
+                api_url,
+                items[offset:offset + chunk],
+                wait_for_results=True)
+        return removed
+
+    def _maybe_extend(item_count: int, head_count: int, *, progressed: bool):
+        nonlocal deadline
+        if not progressed or item_count <= 0:
+            return
+        new_deadline = _extend_clear_deadline(
+            start, deadline, item_count, head_count)
+        if new_deadline > deadline + 0.01:
+            log.info(
+                "queue clear extending deadline to %.1fs "
+                "(%d item(s) remaining)",
+                new_deadline - start, item_count)
+            deadline = new_deadline
+
+    def _purge_wait_timeout(item_count: int) -> float:
+        return max(
+            DEMO_SCHEDULER_PURGE_WAIT * 3,
+            6.0,
+            min(30.0, item_count * 0.04),
+        )
+
+    # Purge whenever *any* pipeline has leftovers (previous demos often
+    # leave hundreds in check even when gate looks small).
+    if request_scheduler_purge is not None and all_items > 0:
+        purge_session_start = request_scheduler_purge()
+        purge_pending_deadline = time.time() + max(
+            DEMO_SCHEDULER_PURGE_WAIT * 4, 8.0, min(30.0, all_items * 0.04))
+        purged = _wait_for_scheduler_purge(
+            purge_session_start,
+            timeout=_purge_wait_timeout(all_items),
+            should_stop=_stop_now)
+        log.info("scheduler purge removed %d item(s)", purged)
+        time.sleep(_clear_processing_wait(all_items))
+        status = _fetch_tenant_status(api_url)
+        item_count = _current_item_count(status)
+        if item_count < items_at_round_start:
+            _maybe_extend(
+                item_count, _all_queue_depth(status), progressed=True)
+            items_at_round_start = item_count
+
     while time.time() < deadline:
+        if _stop_now():
+            elapsed = time.time() - start
+            log.info(
+                "queue_clear_aborted_by_stop cleared=%d elapsed=%.1fs",
+                total_cleared, elapsed)
+            return False, total_cleared, elapsed
         status = _fetch_tenant_status(api_url)
         depth = _all_queue_depth(status)
         item_count = _current_item_count(status)
         if _queue_is_clear(status):
-            if require_gate_only:
-                clear_check_queue_backlog(api_url, status)
-            elapsed = time.time() - start
             cleared_so_far = max(0, initial_items - item_count)
             if on_poll:
                 on_poll(item_count, cleared_so_far)
-            return True, cleared_so_far, elapsed
+            return _finish_success(status)
 
+        progressed = item_count < items_at_round_start
         if item_count >= items_at_round_start and item_count > 0:
             stuck_rounds += 1
         else:
             stuck_rounds = 0
         items_at_round_start = item_count
+        _maybe_extend(item_count, depth, progressed=progressed)
 
         if (stuck_rounds >= DEMO_QUEUE_STUCK_ROUNDS
                 and request_scheduler_purge is not None):
@@ -1614,27 +1923,30 @@ def wait_for_empty_queues(
                 DEMO_SCHEDULER_PURGE_WAIT * 4, 8.0)
             purged = _wait_for_scheduler_purge(
                 purge_session_start,
-                timeout=max(DEMO_SCHEDULER_PURGE_WAIT * 3, 6.0))
+                timeout=_purge_wait_timeout(item_count),
+                should_stop=_stop_now)
             log.info("scheduler purge (stuck) removed %d item(s)", purged)
             stuck_rounds = 0
             time.sleep(DEMO_SCHEDULER_PURGE_WAIT)
 
         dispatched = _dequeue_visible_tails(status)
         if dispatched > 0:
-            time.sleep(DEMO_QUEUE_PROCESSING_WAIT)
+            time.sleep(_clear_processing_wait(item_count))
 
         status = _fetch_tenant_status(api_url)
         item_count = _current_item_count(status)
+        depth = _all_queue_depth(status)
         cleared_so_far = max(0, initial_items - item_count)
         total_cleared = max(total_cleared, cleared_so_far)
         if on_poll:
             on_poll(item_count, cleared_so_far)
         if _queue_is_clear(status):
-            if require_gate_only:
-                clear_check_queue_backlog(api_url, status)
-            elapsed = time.time() - start
-            return True, cleared_so_far, elapsed
-        time.sleep(DEMO_QUEUE_POLL_INTERVAL)
+            return _finish_success(status)
+        _maybe_extend(
+            item_count, depth,
+            progressed=item_count < items_at_round_start)
+        time.sleep(min(DEMO_QUEUE_POLL_INTERVAL,
+                       0.25 if item_count >= 50 else DEMO_QUEUE_POLL_INTERVAL))
 
     if purge_pending_deadline > time.time():
         extra_deadline = purge_pending_deadline + timeout * 0.5
@@ -1642,50 +1954,44 @@ def wait_for_empty_queues(
             "queue clear extending deadline for pending scheduler purge "
             "(until %.1fs)",
             extra_deadline - start)
-        while time.time() < extra_deadline:
+        deadline = max(deadline, extra_deadline)
+        while time.time() < deadline:
+            if _stop_now():
+                elapsed = time.time() - start
+                return False, total_cleared, elapsed
             status = _fetch_tenant_status(api_url)
             item_count = _current_item_count(status)
             if _queue_is_clear(status):
-                if require_gate_only:
-                    clear_check_queue_backlog(api_url, status)
-                elapsed = time.time() - start
-                cleared = max(0, initial_items - item_count)
-                return True, cleared, elapsed
+                return _finish_success(status)
             _dequeue_visible_tails(status)
-            time.sleep(DEMO_QUEUE_PROCESSING_WAIT)
+            time.sleep(_clear_processing_wait(item_count))
             status = _fetch_tenant_status(api_url)
             item_count = _current_item_count(status)
             if _queue_is_clear(status):
-                if require_gate_only:
-                    clear_check_queue_backlog(api_url, status)
-                elapsed = time.time() - start
-                cleared = max(0, initial_items - item_count)
-                return True, cleared, elapsed
+                return _finish_success(status)
             time.sleep(DEMO_QUEUE_POLL_INTERVAL)
 
     final_status = _fetch_tenant_status(api_url)
     if _queue_is_clear(final_status):
-        if require_gate_only:
-            clear_check_queue_backlog(api_url, final_status)
-        elapsed = time.time() - start
-        cleared = max(0, initial_items - _current_item_count(final_status))
-        return True, cleared, elapsed
+        return _finish_success(final_status)
     final_depth = _all_queue_depth(final_status)
     final_items = _current_item_count(final_status)
+    cleared = max(0, initial_items - final_items)
+    elapsed = time.time() - start
     backlog = _describe_queue_backlog(final_status)
+    if _residual_queue_ok(final_items):
+        log.warning(
+            "queue_clear_stragglers items_remaining=%d heads_remaining=%d "
+            "cleared=%d elapsed=%.1fs; starting demo anyway backlog=%s",
+            final_items, final_depth, cleared, elapsed, json.dumps(backlog))
+        if require_gate_only:
+            clear_check_queue_backlog(api_url, final_status)
+        return True, cleared, elapsed
     log.error(
         "queue_clear_timeout items_remaining=%d heads_remaining=%d "
         "cleared=%d elapsed=%.1fs backlog=%s",
-        final_items, final_depth,
-        max(0, initial_items - final_items),
-        time.time() - start,
-        json.dumps(backlog))
-    elapsed = time.time() - start
-    return (
-        False,
-        max(0, initial_items - final_items),
-        elapsed,
-    )
+        final_items, final_depth, cleared, elapsed, json.dumps(backlog))
+    return False, cleared, elapsed
 
 
 def wait_for_empty_gate_queue(
@@ -1746,6 +2052,85 @@ def _tcp_shadow_events(events: Sequence[dict],
     return downsample_keep_span(shadows, LIVE_METRICS_MAX_POINTS)
 
 
+def _as_optional_float(value) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _last_present(series: Optional[Sequence]) -> Optional[float]:
+    if not series:
+        return None
+    for value in reversed(series):
+        parsed = _as_optional_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_executor_from_event(
+        event: dict,
+        *,
+        prev_slots: Optional[float] = None,
+        prev_ratio: Optional[float] = None,
+        prev_cap: Optional[float] = None,
+        prev_in_use: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Return (available_slots, executor_available 0–1, capacity, in_use).
+
+    New audit ticks write ``available_slots`` (int) and
+    ``executor_available`` as the 0–1 ratio. Legacy ticks stored the
+    integer slot count on ``executor_available``.
+    """
+    cap = _as_optional_float(event.get("executor_capacity"))
+    if cap is None:
+        cap = prev_cap
+    slots = _as_optional_float(event.get("available_slots"))
+    in_use = _as_optional_float(event.get("executor_in_use"))
+    raw_avail = _as_optional_float(event.get("executor_available"))
+    ratio: Optional[float] = None
+
+    if slots is None and raw_avail is not None:
+        if raw_avail > 1.0:
+            # Legacy: executor_available was the integer free-slot count.
+            slots = raw_avail
+        else:
+            ratio = raw_avail
+            if cap is not None:
+                slots = round(raw_avail * cap)
+    elif raw_avail is not None and raw_avail <= 1.0:
+        ratio = raw_avail
+
+    if ratio is None and slots is not None and cap and cap > 0:
+        ratio = max(0.0, min(1.0, slots / cap))
+
+    if slots is None and ratio is None:
+        state = event.get("state")
+        if isinstance(state, (list, tuple)) and len(state) > 4:
+            try:
+                ratio = float(state[4])
+            except (TypeError, ValueError):
+                ratio = None
+            if ratio is not None and cap is not None:
+                slots = round(ratio * cap)
+
+    if in_use is None and slots is not None and cap is not None:
+        in_use = max(0.0, cap - slots)
+
+    if slots is None:
+        slots = prev_slots
+    if ratio is None:
+        ratio = prev_ratio
+    if cap is None:
+        cap = prev_cap
+    if in_use is None:
+        in_use = prev_in_use
+    return slots, ratio, cap, in_use
+
+
 def _windows_at(ticks: Sequence[dict], tcp_events: Sequence[dict],
                 ts: float) -> Tuple[Optional[float], Optional[float]]:
     rl = float(DEFAULT_INITIAL_WINDOW)
@@ -1774,6 +2159,29 @@ def _windows_at(ticks: Sequence[dict], tcp_events: Sequence[dict],
     return rl, tcp
 
 
+def _queue_depth_at(ticks: Sequence[dict], ts: float) -> Optional[int]:
+    """Approximate real gate-queue depth at a past timestamp.
+
+    Ticks don't log the raw queue depth, only the normalised
+    queue_saturation state feature (= queue_depth / (2 * ceiling), clipped
+    to 1.0). Reconstructing it lets failure-time "extra changes" be capped
+    by what the queue could actually use, instead of the raw window
+    difference — a window difference is not a real benefit if there were
+    never enough queued changes to fill it.
+    """
+    if not ticks:
+        return None
+    stamps = [float(t["timestamp"]) for t in ticks]
+    idx = bisect_right(stamps, ts) - 1
+    if idx < 0:
+        idx = 0
+    state = ticks[idx].get("state")
+    if not state or len(state) < 2:
+        return None
+    saturation = float(state[1])
+    return int(round(saturation * 2.0 * GATE_WINDOW_CEILING))
+
+
 def _append_series_point(
         timestamps: List[float],
         rl_series: List[float],
@@ -1786,14 +2194,30 @@ def _append_series_point(
         tcp_window: float,
         ticks: Sequence[dict],
         builds: Sequence[dict],
+        available_slots_series: Optional[List[Optional[float]]] = None,
+        executor_available_series: Optional[List[Optional[float]]] = None,
+        executor_capacity_series: Optional[List[Optional[float]]] = None,
+        executor_in_use_series: Optional[List[Optional[float]]] = None,
+        available_slots: Optional[float] = None,
+        executor_available: Optional[float] = None,
+        executor_capacity: Optional[float] = None,
+        executor_in_use: Optional[float] = None,
 ) -> None:
     efficiency = _throughput_efficiency_pct(rl_window, tcp_window)
-    if (
+    same_windows = (
         timestamps
         and rl_window == rl_series[-1]
         and tcp_window == tcp_series[-1]
         and efficiency == efficiency_series[-1]
-    ):
+    )
+    same_exec = True
+    if available_slots_series is not None:
+        same_exec = (
+            available_slots == available_slots_series[-1]
+            and executor_available == executor_available_series[-1]
+            and executor_capacity == executor_capacity_series[-1]
+        )
+    if same_windows and same_exec:
         return
     timestamps.append(ts)
     rl_series.append(rl_window)
@@ -1801,6 +2225,12 @@ def _append_series_point(
     throughput_series.append(
         _throughput_at(ticks, builds, ts, THROUGHPUT_WINDOW_SEC))
     efficiency_series.append(efficiency)
+    if available_slots_series is not None:
+        available_slots_series.append(available_slots)
+        executor_available_series.append(executor_available)
+        executor_capacity_series.append(executor_capacity)
+        if executor_in_use_series is not None:
+            executor_in_use_series.append(executor_in_use)
 
 
 def _build_window_series(
@@ -1809,13 +2239,24 @@ def _build_window_series(
         builds: Sequence[dict],
         session_start: Optional[float],
 ) -> Tuple[List[float], List[float], List[float], List[float],
+           List[Optional[float]], List[Optional[float]],
+           List[Optional[float]], List[Optional[float]],
            List[Optional[float]]]:
-    """Merge RL agent ticks and per-cycle TCP shadow events for the chart."""
+    """Merge RL agent ticks and per-cycle TCP shadow events for the chart.
+
+    Returns timestamps plus RL/TCP/throughput/efficiency and aligned
+    nodepool series: available_slots, executor_available (0–1),
+    executor_capacity, executor_in_use.
+    """
     timestamps: List[float] = []
     rl_series: List[float] = []
     tcp_series: List[float] = []
     throughput_series: List[float] = []
     efficiency_series: List[Optional[float]] = []
+    available_slots_series: List[Optional[float]] = []
+    executor_available_series: List[Optional[float]] = []
+    executor_capacity_series: List[Optional[float]] = []
+    executor_in_use_series: List[Optional[float]] = []
 
     baseline = _seed_baseline_point(session_start)
     timestamps.append(baseline["timestamp"])
@@ -1823,9 +2264,17 @@ def _build_window_series(
     tcp_series.append(baseline["tcp_window"])
     throughput_series.append(baseline["throughput"])
     efficiency_series.append(baseline["throughput_efficiency"])
+    available_slots_series.append(None)
+    executor_available_series.append(None)
+    executor_capacity_series.append(None)
+    executor_in_use_series.append(None)
 
     current_rl = baseline["rl_window"]
     current_tcp = baseline["tcp_window"]
+    current_slots: Optional[float] = None
+    current_ratio: Optional[float] = None
+    current_cap: Optional[float] = None
+    current_in_use: Optional[float] = None
 
     merged: List[Tuple[str, float, dict]] = []
     for tick in ticks:
@@ -1839,8 +2288,28 @@ def _build_window_series(
             current_rl = float(
                 payload.get("actual_window",
                             payload.get("recommended_window", current_rl)))
+            current_slots, current_ratio, current_cap, current_in_use = (
+                _parse_executor_from_event(
+                    payload,
+                    prev_slots=current_slots,
+                    prev_ratio=current_ratio,
+                    prev_cap=current_cap,
+                    prev_in_use=current_in_use,
+                )
+            )
         else:
             current_tcp = float(payload["window_after"])
+            if payload.get("available_slots") is not None or (
+                    payload.get("executor_available") is not None):
+                current_slots, current_ratio, current_cap, current_in_use = (
+                    _parse_executor_from_event(
+                        payload,
+                        prev_slots=current_slots,
+                        prev_ratio=current_ratio,
+                        prev_cap=current_cap,
+                        prev_in_use=current_in_use,
+                    )
+                )
         _append_series_point(
             timestamps, rl_series, tcp_series, throughput_series,
             efficiency_series,
@@ -1849,10 +2318,20 @@ def _build_window_series(
             tcp_window=current_tcp,
             ticks=ticks,
             builds=builds,
+            available_slots_series=available_slots_series,
+            executor_available_series=executor_available_series,
+            executor_capacity_series=executor_capacity_series,
+            executor_in_use_series=executor_in_use_series,
+            available_slots=current_slots,
+            executor_available=current_ratio,
+            executor_capacity=current_cap,
+            executor_in_use=current_in_use,
         )
 
     return (timestamps, rl_series, tcp_series, throughput_series,
-            efficiency_series)
+            efficiency_series, available_slots_series,
+            executor_available_series, executor_capacity_series,
+            executor_in_use_series)
 
 
 def _throughput_efficiency_pct(rl_size: float, tcp_size: float) -> Optional[float]:
@@ -1935,6 +2414,8 @@ def _wait_for_gate_build_activity(
     deadline = start + wait_timeout
     last_stats = _gate_build_activity([], session_start)
     while time.time() < deadline:
+        if _demo_stop_requested():
+            return last_stats
         with _METRICS_LOCK:
             _BUILDS_CACHE["ts"] = 0.0
             _BUILDS_CACHE["data"] = []
@@ -1993,8 +2474,13 @@ def _session_scoped_events(events: Sequence[dict],
 
 
 def _is_gate_job_failure(build: dict) -> bool:
+    """True for a completed gate job FAILURE (stamped playbook fail).
+
+    Merge conflicts, skips, retries, and incomplete builds are not
+    counted toward the user fail budget.
+    """
     result = (build.get("result") or "").upper()
-    return result not in ("SUCCESS", "MERGE", "NEW", None, "")
+    return result == "FAILURE"
 
 
 def _last_rl_shrink_ts(ticks: Sequence[dict]) -> Optional[float]:
@@ -2188,10 +2674,16 @@ JOB_RUNS_SAVED_FORMULA = (
     "(≈ serial gate job-runs saved when jobs are ~1s; "
     "minutes_saved = job_runs_saved × avg_job_duration_sec / 60)"
 )
-# Display cap so tiny TCP_after denominators cannot produce absurd % next to
-# modest extras/minutes (raw uncapped value is still exposed).
+# Safety cap for the rare case TCP_after is a near-zero denominator (a
+# real divide-by-tiny-number blowup, not just "a big but honest number").
+# The previous default of 200 was hit routinely by completely ordinary
+# results (e.g. extra=9 vs a TCP floor of 4 = a genuine, modest 225%),
+# which meant the demo was silently understating its own result behind
+# a "200%*" display with the real number hidden in a hover-only tooltip.
+# Raw uncapped value is always exposed (rl_advantage_pct_raw) regardless
+# of this cap.
 ADVANTAGE_PCT_DISPLAY_CAP = float(
-    os.environ.get("RL_ADVANTAGE_PCT_DISPLAY_CAP", "200"))
+    os.environ.get("RL_ADVANTAGE_PCT_DISPLAY_CAP", "2000"))
 
 
 def _count_merged_gate_builds(builds: Sequence[dict]) -> int:
@@ -2470,14 +2962,26 @@ def _session_impact_summary(
 def _failure_extra_changes(
         rl_window: Optional[float],
         tcp_window: Optional[float],
-        tcp_after: Optional[int] = None) -> int:
-    """Extra parallel slots RL kept vs TCP at a failure (R − T, floored at 0)."""
+        tcp_after: Optional[int] = None,
+        queue_depth: Optional[float] = None) -> int:
+    """Extra parallel slots RL kept vs TCP at a failure (R − T, floored at 0).
+
+    When queue_depth is known, both windows are first capped by it — extra
+    window capacity is not a real benefit if the queue never had enough
+    changes waiting to use it (same capping _changes_in_window_counts
+    already applies to the live/continuous effectiveness metric).
+    """
     if rl_window is None:
         return 0
     tcp = tcp_after if tcp_after is not None else tcp_window
     if tcp is None:
         return 0
-    return max(0, int(round(float(rl_window))) - int(round(float(tcp))))
+    rl_val = float(rl_window)
+    tcp_val = float(tcp)
+    if queue_depth is not None:
+        rl_val, tcp_val = _changes_in_window_counts(
+            int(round(queue_depth)), rl_val, tcp_val)
+    return max(0, int(round(rl_val)) - int(round(tcp_val)))
 
 
 def _failure_impact_text(
@@ -2625,7 +3129,8 @@ def _build_session_summary(
     Headline demo counts (UI Session summary):
       - changes_submitted / submitted — demo traffic submitted this session
       - merged / session_changes_merged — successful gate merges
-      - gate_failures — stamped / speculative gate fails ("in conflict" in UI)
+      - gate_failures — completed research-gate-job FAILURE results
+        (stamped should_fail), not git merge conflicts
       - extra_changes_total — session extras accommodated vs TCP
     """
     fail_n = len(failures)
@@ -2660,14 +3165,35 @@ def _build_session_summary(
     else:
         changes_submitted = max(0, int(changes_submitted or 0))
 
+    # Submitted = Merged + Dropped + Rescheduled, always, by construction:
+    # dropped is completed gate FAILURE results (fail_n — the item was
+    # reported as a gate failure and left the queue, not retried
+    # automatically), and rescheduled is the residual — everything still
+    # cycling through the gate (queued, requeued after an upstream reset,
+    # or currently building). Computing rescheduled as a residual rather
+    # than tracking it independently guarantees the invariant holds
+    # rather than relying on two separately-tracked counts to agree.
+    dropped = max(0, min(fail_n, changes_submitted))
+    rescheduled = max(0, changes_submitted - merged - dropped)
+
     return {
         # Headline demo counts (keep aliases in sync — one model).
         "changes_submitted": changes_submitted,
         "submitted": changes_submitted,
         "merged": merged,
         "session_changes_merged": merged,
-        # Gate stamped / speculative fails (UI: "Failed (gate)" / in-conflict).
+        # Completed gate job FAILURE results (UI: "Failed (gate)").
         "gate_failures": fail_n,
+        # All cycle failures, including merge conflicts that never ran a
+        # job — this is what actually drives window shrinks and can exceed
+        # gate_failures. "rescheduled" below still lumps un-retried merge
+        # conflicts in with genuinely-requeued items (see comment above);
+        # this field lets the UI at least disclose that gap rather than
+        # implying every failure is a stamped job failure.
+        "cycle_failures_total": int(failure_counts.get("gate_cycles_total", 0) or 0),
+        # Submitted = merged + dropped + rescheduled (see comment above).
+        "dropped": dropped,
+        "rescheduled": rescheduled,
         "extra_changes_total": extras,
         "job_runs_saved": job_runs_saved_est(extras),
         "minutes_saved": minutes,
@@ -2714,6 +3240,17 @@ def session_summary_invariants(summary: dict) -> List[str]:
         violations.append(
             f"job_runs_saved ({job_runs}) must equal "
             f"extra_changes_total ({extras})")
+    submitted = summary.get("changes_submitted")
+    merged = summary.get("merged")
+    dropped = summary.get("dropped")
+    rescheduled = summary.get("rescheduled")
+    if None not in (submitted, merged, dropped, rescheduled):
+        total = int(merged) + int(dropped) + int(rescheduled)
+        if total != int(submitted):
+            violations.append(
+                f"changes_submitted ({submitted}) must equal "
+                f"merged ({merged}) + dropped ({dropped}) + "
+                f"rescheduled ({rescheduled}) = {total}")
     if minutes >= 0.1 and extras <= 0:
         violations.append(
             "minutes_saved > 0 requires extra_changes_total > 0")
@@ -2836,7 +3373,7 @@ def _build_comparison_table(
             "benefit": "same merges",
         },
         {
-            "metric": "Failed (gate) / in conflict (actual / expected)",
+            "metric": "Failed (gate) (actual / expected)",
             "tcp_only": f"{fail_n}/{expected_n}",
             "with_rl": f"{fail_n}/{expected_n}",
             "benefit": "same load",
@@ -3043,6 +3580,10 @@ def _fetch_live_gate_state(api_url: str) -> Optional[dict]:
             "decision_detail": queue.get("decision_detail") or "",
             "queue_saturated": queue_is_saturated(gate_count, rl_f, tcp_f),
             "queue_target": queue_saturation_target(rl_f, tcp_f),
+            "available_slots": queue.get("available_slots"),
+            "executor_capacity": queue.get("executor_capacity"),
+            "executor_in_use": queue.get("executor_in_use"),
+            "executor_available": queue.get("executor_available"),
         }
     return None
 
@@ -3067,6 +3608,11 @@ def _extend_series_to_now(
         fallback_rl: float,
         fallback_tcp: float,
         live_windows: Optional[Tuple[float, float]] = None,
+        available_slots_series: Optional[List[Optional[float]]] = None,
+        executor_available_series: Optional[List[Optional[float]]] = None,
+        executor_capacity_series: Optional[List[Optional[float]]] = None,
+        executor_in_use_series: Optional[List[Optional[float]]] = None,
+        live_executor: Optional[dict] = None,
 ) -> Tuple[float, float]:
     """Append a live point at now so integrals and latest windows stay current."""
     now = time.time()
@@ -3075,6 +3621,26 @@ def _extend_series_to_now(
     else:
         rl_now = float(fallback_rl)
         tcp_now = float(fallback_tcp)
+    slots = None
+    ratio = None
+    cap = None
+    in_use = None
+    if available_slots_series:
+        slots = available_slots_series[-1]
+        ratio = executor_available_series[-1] if executor_available_series else None
+        cap = executor_capacity_series[-1] if executor_capacity_series else None
+        in_use = executor_in_use_series[-1] if executor_in_use_series else None
+    if live_executor:
+        live_slots, live_ratio, live_cap, live_in_use = (
+            _parse_executor_from_event(
+                live_executor,
+                prev_slots=slots,
+                prev_ratio=ratio,
+                prev_cap=cap,
+                prev_in_use=in_use,
+            )
+        )
+        slots, ratio, cap, in_use = live_slots, live_ratio, live_cap, live_in_use
     _append_series_point(
         timestamps, rl_series, tcp_series, throughput_series,
         efficiency_series,
@@ -3083,6 +3649,14 @@ def _extend_series_to_now(
         tcp_window=tcp_now,
         ticks=ticks,
         builds=builds,
+        available_slots_series=available_slots_series,
+        executor_available_series=executor_available_series,
+        executor_capacity_series=executor_capacity_series,
+        executor_in_use_series=executor_in_use_series,
+        available_slots=slots,
+        executor_available=ratio,
+        executor_capacity=cap,
+        executor_in_use=in_use,
     )
     return rl_now, tcp_now
 
@@ -3095,7 +3669,8 @@ def build_live_metrics() -> dict:
     builds = _gate_builds(_cached_builds(ZUUL_API), session_start)
 
     (timestamps, rl_series, tcp_series, throughput_series,
-     efficiency_series) = _build_window_series(
+     efficiency_series, available_slots_series, executor_available_series,
+     executor_capacity_series, executor_in_use_series) = _build_window_series(
         ticks, tcp_events, builds, session_start)
 
     fallback_rl = rl_series[-1] if rl_series else float(DEFAULT_INITIAL_WINDOW)
@@ -3104,8 +3679,15 @@ def build_live_metrics() -> dict:
     now = time.time()
     live_state = _fetch_live_gate_state(ZUUL_API)
     live_windows = None
+    live_executor = None
     if live_state is not None:
         live_windows = (live_state["rl_window"], live_state["tcp_window"])
+        live_executor = {
+            "available_slots": live_state.get("available_slots"),
+            "executor_capacity": live_state.get("executor_capacity"),
+            "executor_in_use": live_state.get("executor_in_use"),
+            "executor_available": live_state.get("executor_available"),
+        }
     last_rl_window, last_tcp_window = _extend_series_to_now(
         timestamps, rl_series, tcp_series, throughput_series,
         efficiency_series,
@@ -3114,6 +3696,11 @@ def build_live_metrics() -> dict:
         fallback_rl=fallback_rl,
         fallback_tcp=fallback_tcp,
         live_windows=live_windows,
+        available_slots_series=available_slots_series,
+        executor_available_series=executor_available_series,
+        executor_capacity_series=executor_capacity_series,
+        executor_in_use_series=executor_in_use_series,
+        live_executor=live_executor,
     )
 
     failure_counts = _compute_failure_counts(
@@ -3142,7 +3729,9 @@ def build_live_metrics() -> dict:
         duration = _build_duration_sec(build)
         tcp_before, tcp_after = _tcp_shrink_near_failure(tcp_events, ts)
         par_gain = round((rl or 0) - (tcp or 0), 1)
-        extra_changes = _failure_extra_changes(rl, tcp, tcp_after)
+        queue_depth = _queue_depth_at(ticks, ts)
+        extra_changes = _failure_extra_changes(
+            rl, tcp, tcp_after, queue_depth)
         in_window_delta = extra_changes
         impact_text = _failure_impact_text(
             change_id=change_id,
@@ -3201,7 +3790,9 @@ def build_live_metrics() -> dict:
             session_index += 1
             par_gain = round((rl_at or 0) - (tcp_at or 0), 1)
             tcp_after_i = int(tcp_after) if tcp_after is not None else None
-            extra_changes = _failure_extra_changes(rl_at, tcp_at, tcp_after_i)
+            queue_depth = _queue_depth_at(ticks, evt_ts)
+            extra_changes = _failure_extra_changes(
+                rl_at, tcp_at, tcp_after_i, queue_depth)
             in_window_delta = extra_changes
             impact_text = _failure_impact_text(
                 change_id=change_id,
@@ -3339,6 +3930,10 @@ def build_live_metrics() -> dict:
             "avg_gate_job_duration_sec"],
         "minutes_saved_formula": MINUTES_SAVED_FORMULA,
         "job_runs_saved_formula": JOB_RUNS_SAVED_FORMULA,
+        "available_slots": _last_present(available_slots_series),
+        "executor_capacity": _last_present(executor_capacity_series),
+        "executor_available": _last_present(executor_available_series),
+        "executor_in_use": _last_present(executor_in_use_series),
     }
 
     session_summary = _build_session_summary(
@@ -3381,7 +3976,15 @@ def build_live_metrics() -> dict:
         "tcp_window": tcp_series,
         "throughput": throughput_series,
         "throughput_efficiency": rebuilt_eff or efficiency_series,
-        "failures": failures[-20:],
+        "available_slots": available_slots_series,
+        "executor_available": executor_available_series,
+        "executor_capacity": executor_capacity_series,
+        "executor_in_use": executor_in_use_series,
+        # Full session history, not just the most recent window: the chart
+        # and its failure count must agree, and zooming needs the earlier
+        # failures too. Capped generously rather than unbounded so a
+        # pathological session can't bloat the payload.
+        "failures": failures[-500:],
         "failure_counts": failure_counts,
         "effectiveness": effectiveness,
         "latest": latest,
@@ -3398,6 +4001,7 @@ def build_live_metrics() -> dict:
         "demo_duration_sec": DEMO_DURATION_SEC,
         "expected_failures_min": DEMO_FAIL_PER_BATCH,
         "expected_failures": _session_expected_failures(),
+        "gate_failures_target": _session_gate_failures_target(),
         "default_total_changes": defaults["total_changes"],
         "default_gate_failures": defaults["gate_failures"],
         "fail_per_batch": DEMO_FAIL_PER_BATCH,
@@ -3421,12 +4025,17 @@ def run_demo():
     assert params is not None
     with LOCK:
         if STATE["running"]:
-            prog = _demo_progress_snapshot()
+            prog = dict(STATE.get("demo_progress") or {})
+            stopping = bool(
+                STATE.get("stopping") or STATE.get("stop_requested"))
             return jsonify({
                 "ok": False,
-                "message": "demo already running",
+                "message": (
+                    "demo is stopping" if stopping else "demo already running"
+                ),
                 "demo_id": prog.get("demo_id"),
                 "phase": prog.get("phase"),
+                "stopping": stopping,
             }), 409
         demo_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         started = time.time()
@@ -3434,10 +4043,20 @@ def run_demo():
         STATE["started_at"] = started
         STATE["finished_at"] = None
         STATE["last_error"] = None
+        STATE["stop_requested"] = False
+        STATE["stopping"] = False
+        STATE["traffic_stop"] = False
+        STATE["active_demo_id"] = demo_id
         STATE["demo_total_changes"] = params["total_changes"]
         STATE["demo_gate_failures"] = params["gate_failures"]
         STATE["demo_expected_failures"] = params["expected_failures"]
         STATE["demo_fail_stamped"] = 0
+        # _set_demo_progress only ever partially updates the existing
+        # dict, so any field a previous session set (batch_current,
+        # message, rl_window, tcp_window, ...) would otherwise leak into
+        # this new session's display until this session happens to touch
+        # that same field itself. Start from a guaranteed-clean baseline.
+        STATE["demo_progress"] = _demo_progress_idle()
     session_start = _request_demo_reset()
     _reset_audit_reader()
     _invalidate_live_metrics_cache()
@@ -3508,14 +4127,69 @@ def _run_traffic(*args):
         timeout=DEMO_DURATION_SEC + DEMO_BATCH_INTERVAL_SEC * 4 + 600)
 
 
-def _live_failure_count() -> int:
+def _invalidate_builds_cache():
+    with _METRICS_LOCK:
+        _BUILDS_CACHE["ts"] = 0.0
+        _BUILDS_CACHE["data"] = []
+
+
+def _live_failure_count(*, fresh: bool = False) -> int:
+    """Completed session gate job FAILURE count (research-gate-job)."""
     try:
+        if fresh:
+            _invalidate_live_metrics_cache()
+            _invalidate_builds_cache()
         return int(
             _get_cached_live_metrics()
             .get("failure_counts", {})
             .get("gate_jobs_total", 0))
     except Exception:
         return 0
+
+
+def _live_cycle_failure_count() -> int:
+    """Completed session cycle failures: job failures PLUS merge conflicts
+    and other non-job reasons a gate cycle can fail to merge.
+
+    This is what actually drives window shrinks (adjust_window_after_cycle
+    fires on any of these), unlike _live_failure_count's narrower job-only
+    fail budget — surfaced separately so a session with plenty of merge
+    conflicts but few/no stamped job failures doesn't show "0 failures"
+    next to a window that has clearly reacted to something.
+    """
+    try:
+        return int(
+            _get_cached_live_metrics()
+            .get("failure_counts", {})
+            .get("gate_cycles_total", 0))
+    except Exception:
+        return 0
+
+
+def _wait_for_observed_failures(
+        target: int,
+        timeout: float,
+        *,
+        on_poll=None) -> int:
+    """Poll until completed gate FAILURES ≥ target or timeout.
+
+    Does not submit more changes — used after stamps so in-flight gate
+    jobs can finish before catch-up compensation.
+    """
+    target = max(0, int(target))
+    deadline = time.time() + max(0.0, float(timeout))
+    observed = _live_failure_count(fresh=True)
+    while observed < target and time.time() < deadline:
+        if _traffic_should_stop():
+            break
+        if on_poll is not None:
+            try:
+                on_poll(observed, max(0.0, deadline - time.time()))
+            except Exception:
+                pass
+        time.sleep(min(2.0, max(0.2, deadline - time.time())))
+        observed = _live_failure_count(fresh=True)
+    return observed
 
 
 def _traffic_should_stop() -> bool:
@@ -3534,8 +4208,10 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
     """Push batches every DEMO_BATCH_INTERVAL_SEC for DEMO_DURATION_SEC.
 
     Honours extend_batches (does not cancel in-flight builds) and traffic_stop.
-    When demo_total_changes / demo_gate_failures are set (via /run-demo),
-    stops after the change target and stamps fails to hit the fail target.
+    When demo_gate_failures=N is set, the loop stamps and waits until N
+    completed research-gate-job FAILURE results are observed (not merely
+    stamps, not merge conflicts). Duration / change-count cannot stop
+    the loop while that budget is still open (until catch-up cap).
     """
     sys_path_traffic = str(TRAFFIC_DIR / "traffic")
     if sys_path_traffic not in sys.path:
@@ -3553,6 +4229,9 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         target_total = max(0, int(target_total))
     if target_fails is not None:
         target_fails = max(0, int(target_fails))
+    # Exact fail count: never Depends-On (parent fail would skip gate jobs).
+    enable_depend = target_fails is None
+    max_catch_up_rounds = DEMO_FAIL_CATCH_UP_MAX_ROUNDS
 
     started = time.time()
     # Size the deadline so duration alone cannot strand change/fail targets.
@@ -3566,17 +4245,28 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
     if target_fails is not None and target_fails > 0:
         est_fail_batches = max(
             1, int(math.ceil(target_fails / max(DEMO_BATCH_SIZE, 1))))
-        # Extra slack for check timeouts / skips that need catch-up batches.
         duration = max(
             duration,
-            est_fail_batches * DEMO_BATCH_INTERVAL_SEC + 180.0)
+            est_fail_batches * DEMO_BATCH_INTERVAL_SEC
+            + DEMO_FAIL_CATCH_UP_WAIT_SEC * 3
+            + 180.0)
     with LOCK:
         # Full duration of traffic measured from the first batch —
         # setup phases (layout sync, queue clear) must not eat into it.
         deadline = started + duration
         STATE["traffic_deadline"] = deadline
         STATE["batches_completed"] = 0
-        STATE["traffic_stop"] = False
+        if not (STATE.get("stop_requested") or STATE.get("stopping")):
+            STATE["traffic_stop"] = False
+
+    if _demo_stop_requested():
+        _set_demo_progress(traffic_active=False, extend_available=False)
+        return {
+            "batches": 0,
+            "submitted": 0,
+            "fail_stamped": 0,
+            "duration_sec": 0.0,
+        }
 
     planned = _planned_batches(max(0.0, deadline - started))
     if target_total is not None and target_total > 0:
@@ -3589,7 +4279,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         duration_sec=max(0.0, deadline - started),
     )
     fail_note = (
-        f"{target_fails} fail stamps target"
+        f"{target_fails} completed gate FAILURES"
         if target_fails is not None
         else f"{DEMO_FAIL_PER_BATCH} fail + {DEMO_PASS_PER_BATCH} pass / batch")
     change_note = (
@@ -3622,61 +4312,122 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
     total_submitted = 0
     total_fail_stamped = 0
     catch_up_rounds = 0
-    max_catch_up_rounds = 8
     all_change_ids: List[str] = []
 
+    def _observed() -> int:
+        return _live_failure_count(fresh=True)
+
+    def _wait_inflight_then_maybe_compensate(observed_now: int) -> int:
+        """Wait for in-flight stamps; return updated observed count."""
+        if target_fails is None or observed_now >= target_fails:
+            return observed_now
+        if total_fail_stamped <= observed_now:
+            return observed_now
+
+        def _on_wait(obs: int, left: float):
+            _set_demo_progress(
+                failures_so_far=obs,
+                expected_failures=expected_fails,
+                message=(
+                    f"Waiting for gate FAILURES {obs}/{target_fails} "
+                    f"({int(left)}s) before catch-up"
+                ),
+            )
+
+        return _wait_for_observed_failures(
+            target_fails,
+            DEMO_FAIL_CATCH_UP_WAIT_SEC,
+            on_poll=_on_wait,
+        )
+
     while True:
-        if _traffic_should_stop():
-            break
-        remaining_fails_now = (
-            max(0, target_fails - total_fail_stamped)
-            if target_fails is not None else 0)
-        hit_change_cap = (
-            target_total is not None and total_submitted >= target_total)
-        # Hit change cap with fail budget still open → catch-up batch of
-        # remaining fail stamps (does not count against the change cap).
-        catch_up_fails = bool(
-            hit_change_cap and target_fails is not None
-            and remaining_fails_now > 0
-            and catch_up_rounds < max_catch_up_rounds)
-        if hit_change_cap and not catch_up_fails:
-            break
-        if (target_fails is not None and target_fails > 0
-                and total_fail_stamped >= target_fails
-                and (target_total is None or hit_change_cap)):
-            break
+        observed = _observed()
+        with LOCK:
+            pending_extend = int(STATE.get("extend_batches") or 0)
+        cont, reason = traffic_loop_should_continue(
+            stop=_traffic_should_stop(),
+            target_total=target_total,
+            target_fails=target_fails,
+            submitted=total_submitted,
+            observed=observed,
+            now=time.time(),
+            deadline=float(deadline),
+            catch_up_rounds=catch_up_rounds,
+            max_catch_up=max_catch_up_rounds,
+            extend_pending=pending_extend,
+        )
+        if not cont:
+            if (
+                reason in ("change_cap", "fail_budget_met", "deadline")
+                and target_fails is not None
+                and observed < target_fails
+                and total_fail_stamped > observed
+            ):
+                observed = _wait_inflight_then_maybe_compensate(observed)
+                if observed >= target_fails:
+                    break
+                if catch_up_rounds < max_catch_up_rounds:
+                    reason = "fail_catch_up"
+                    cont = True
+            if not cont:
+                break
+
+        catch_up_fails = reason in ("fail_catch_up", "fail_catch_up_deadline")
+        if catch_up_fails and target_fails is not None:
+            # Stamps in flight may still complete — wait before compensating.
+            need_now = fail_stamps_needed(
+                target_fails, observed, total_fail_stamped, compensate=False)
+            if need_now <= 0 and observed < target_fails:
+                observed = _wait_inflight_then_maybe_compensate(observed)
+                if observed >= target_fails:
+                    break
+                need_now = fail_stamps_needed(
+                    target_fails, observed, total_fail_stamped,
+                    compensate=True)
+                # Treat remaining observed shortfall as needing new stamps
+                # (lost check-timeout / skipped jobs).
+                if need_now > 0:
+                    total_fail_stamped = min(total_fail_stamped, observed)
+            if observed >= target_fails:
+                if target_total is None or total_submitted >= target_total:
+                    break
+                catch_up_fails = False
+
         now = time.time()
         extend_n = _pop_extend_batches()
         with LOCK:
             deadline = float(STATE.get("traffic_deadline") or deadline)
             if extend_n > 0:
-                # Keep session live; extend does not cancel in-flight builds.
                 STATE["traffic_deadline"] = max(deadline, now) + (
                     extend_n * DEMO_BATCH_INTERVAL_SEC)
                 deadline = float(STATE["traffic_deadline"])
 
-        needs_fail_catchup = (
-            target_fails is not None
-            and total_fail_stamped < target_fails
-            and catch_up_rounds < max_catch_up_rounds)
         if batch_num > 0 and now >= deadline and extend_n <= 0:
-            if needs_fail_catchup or catch_up_fails:
-                # Extend just enough for one more catch-up batch.
+            if catch_up_fails or (
+                    target_fails is not None
+                    and observed < target_fails
+                    and catch_up_rounds < max_catch_up_rounds):
                 with LOCK:
                     STATE["traffic_deadline"] = (
                         now + DEMO_BATCH_INTERVAL_SEC + 30.0)
                     deadline = float(STATE["traffic_deadline"])
             else:
-                # Allow one more batch if extend just arrived.
                 extend_n = _pop_extend_batches()
                 if extend_n <= 0:
-                    break
-                with LOCK:
-                    STATE["traffic_deadline"] = now + (
-                        extend_n * DEMO_BATCH_INTERVAL_SEC)
-                    deadline = float(STATE["traffic_deadline"])
+                    if fail_budget_met(target_fails, observed):
+                        break
+                    if catch_up_rounds >= max_catch_up_rounds:
+                        break
+                    with LOCK:
+                        STATE["traffic_deadline"] = (
+                            now + DEMO_BATCH_INTERVAL_SEC + 30.0)
+                        deadline = float(STATE["traffic_deadline"])
+                else:
+                    with LOCK:
+                        STATE["traffic_deadline"] = now + (
+                            extend_n * DEMO_BATCH_INTERVAL_SEC)
+                        deadline = float(STATE["traffic_deadline"])
 
-        failures = _live_failure_count()
         remaining = max(0.0, deadline - time.time())
 
         # Adaptive saturation: size this batch so gate queue depth stays
@@ -3687,22 +4438,35 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         pre_rl = float(pre_live.get("rl_window") or DEFAULT_INITIAL_WINDOW)
         pre_tcp = float(pre_live.get("tcp_window") or DEFAULT_INITIAL_WINDOW)
         batch_size = adaptive_batch_size(pre_depth, pre_rl, pre_tcp)
+        need_stamps = fail_stamps_needed(
+            target_fails, observed, total_fail_stamped,
+            compensate=catch_up_fails)
         if catch_up_fails:
-            # Dedicated fail-stamp top-up after the change cap.
             batch_size = min(
-                max(1, remaining_fails_now), DEMO_MAX_BATCH_SIZE)
+                max(1, need_stamps or max(0, (target_fails or 0) - observed)),
+                DEMO_MAX_BATCH_SIZE)
         elif target_total is not None:
             remaining_changes = max(0, target_total - total_submitted)
-            if remaining_changes <= 0 and not needs_fail_catchup:
-                break
-            if remaining_changes > 0:
+            if remaining_changes <= 0 and not catch_up_fails:
+                if fail_budget_met(target_fails, observed):
+                    break
+                catch_up_fails = True
+                need_stamps = fail_stamps_needed(
+                    target_fails, observed, total_fail_stamped,
+                    compensate=True)
+                batch_size = min(
+                    max(1, need_stamps), DEMO_MAX_BATCH_SIZE)
+            elif remaining_changes > 0:
                 batch_size = min(batch_size, remaining_changes)
 
         if target_fails is not None:
-            remaining_fails = max(0, target_fails - total_fail_stamped)
-            if remaining_fails <= 0 and (
+            if fail_budget_met(target_fails, observed) and (
                     target_total is None or total_submitted >= target_total):
                 break
+            remaining_fails = need_stamps if catch_up_fails else (
+                fail_stamps_needed(
+                    target_fails, observed, total_fail_stamped,
+                    compensate=False))
             if catch_up_fails:
                 fail_n = min(batch_size, remaining_fails)
             elif target_total is not None:
@@ -3713,13 +4477,11 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                     fail_n = fails_for_batch(
                         batch_size, remaining_changes, remaining_fails)
             else:
-                # Duration mode with an absolute fail target.
                 batches_left = max(
                     1, int(remaining // DEMO_BATCH_INTERVAL_SEC) + 1)
                 fail_n = fails_for_duration_batch(
                     batch_size, remaining_fails, batches_left)
         elif batch_size > 0 and DEMO_FAIL_PER_BATCH > 0:
-            # Deterministic fail ratio scales with batch size (half fail).
             fail_n = max(1, round(
                 batch_size * DEMO_FAIL_PER_BATCH / max(DEMO_BATCH_SIZE, 1)))
         else:
@@ -3727,6 +4489,14 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         fail_n = min(int(fail_n), batch_size)
         if batch_size <= 0:
             break
+        if catch_up_fails and fail_n <= 0:
+            observed = _wait_inflight_then_maybe_compensate(observed)
+            if fail_budget_met(target_fails, observed):
+                break
+            catch_up_rounds += 1
+            if catch_up_rounds >= max_catch_up_rounds:
+                break
+            continue
         target = queue_saturation_target(pre_rl, pre_tcp)
         topup_note = (
             f" · queue {pre_depth} < target {target} — topping up"
@@ -3734,7 +4504,8 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         )
         if catch_up_fails:
             topup_note = (
-                f" · fail catch-up ({remaining_fails_now} stamps left)"
+                f" · fail catch-up "
+                f"({max(0, (target_fails or 0) - observed)} FAILURES left)"
             )
         _set_demo_progress(
             phase="submitting_traffic",
@@ -3749,29 +4520,30 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                 duration_sec=max(0.0, deadline - started),
             ),
             changes_submitted=total_submitted,
-            failures_so_far=failures,
+            failures_so_far=observed,
             time_remaining_s=round(remaining, 1),
             extend_available=True,
             gate_queue_depth=pre_depth,
             queue_saturated=queue_is_saturated(pre_depth, pre_rl, pre_tcp),
             queue_target=target,
             expected_failures=expected_fails,
+            gate_failures_target=target_fails,
             message=(
                 f"Batch {batch_num + 1} — pushing {batch_size} changes "
                 f"({fail_n} fail + {batch_size - fail_n} pass)"
                 f"{topup_note} · {total_submitted} submitted · "
-                f"{failures} gate failures · "
-                f"~{int(remaining // 60)}:{int(remaining % 60):02d} left"
+                f"{observed} gate FAILURES"
+                + (f"/{target_fails}" if target_fails is not None else "")
+                + f" · ~{int(remaining // 60)}:{int(remaining % 60):02d} left"
             ),
             percent=min(70, 22 + batch_num * 4),
         )
 
         def _on_change_progress(done: int, size: int,
                                 _batch=batch_num, _base=total_submitted):
-            # Heartbeat during pushes + Verified waits — a batch can take
-            # minutes; without this the progress panel would look frozen.
             _set_demo_progress(
                 changes_submitted=_base,
+                failures_so_far=_live_failure_count(),
                 message=(
                     f"Batch {_batch + 1} — {done}/{size} changes pushed "
                     f"(check → Verified+1 → gate)"
@@ -3791,8 +4563,6 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
             )
 
         try:
-            # Heartbeat covers the whole push + Verified wait (can take
-            # minutes); per-change on_progress adds completion counts.
             with _PhaseHeartbeat(_batch_heartbeat_message, interval=4.0):
                 result = traffic_gen.submit_batch(
                     project="test1",
@@ -3800,10 +4570,12 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                     batch_size=batch_size,
                     fail_per_batch=fail_n,
                     promote_to_gate=True,
+                    immediate_gate=bool(catch_up_fails),
                     workers=TRAFFIC_WORKERS,
                     start_index=total_submitted,
                     prior_change_ids=all_change_ids,
                     on_progress=_on_change_progress,
+                    enable_depend=enable_depend,
                 )
         except Exception as exc:  # noqa: BLE001 — batch skip, keep demo alive
             log.exception("batch %d submission failed; skipping", batch_num)
@@ -3826,6 +4598,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         with LOCK:
             STATE["batches_completed"] = batch_num
 
+        observed = _observed()
         live = _fetch_live_gate_state(ZUUL_API) or {}
         _set_demo_progress(
             batches_completed=batch_num,
@@ -3837,7 +4610,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                 duration_sec=max(0.0, deadline - started),
             ),
             changes_submitted=total_submitted,
-            failures_so_far=_live_failure_count(),
+            failures_so_far=observed,
             gate_queue_depth=live.get("gate_queue_count", 0),
             rl_window=live.get("rl_window"),
             tcp_window=live.get("tcp_window"),
@@ -3848,10 +4621,46 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
             ),
             time_remaining_s=round(max(0.0, deadline - time.time()), 1),
             expected_failures=expected_fails,
+            gate_failures_target=target_fails,
         )
 
-        if target_total is not None and total_submitted >= target_total:
+        # After stamps reach N, wait for those jobs to complete before
+        # treating the budget as done (or compensating).
+        if (
+            target_fails is not None
+            and total_fail_stamped >= target_fails
+            and observed < target_fails
+        ):
+            observed = _wait_inflight_then_maybe_compensate(observed)
+            _set_demo_progress(failures_so_far=observed)
+
+        cont, reason = traffic_loop_should_continue(
+            stop=_traffic_should_stop(),
+            target_total=target_total,
+            target_fails=target_fails,
+            submitted=total_submitted,
+            observed=observed,
+            now=time.time(),
+            deadline=float(deadline),
+            catch_up_rounds=catch_up_rounds,
+            max_catch_up=max_catch_up_rounds,
+            extend_pending=int(STATE.get("extend_batches") or 0),
+        )
+        if not cont and reason != "fail_catch_up":
+            if (
+                target_fails is not None
+                and observed < target_fails
+                and catch_up_rounds < max_catch_up_rounds
+            ):
+                continue
             break
+        if catch_up_fails:
+            # Do not wait the full interval between fail-compensation batches.
+            continue
+        if target_total is not None and total_submitted >= target_total:
+            if fail_budget_met(target_fails, observed):
+                break
+            continue
 
         # Sleep until next batch interval (interruptible for extend/stop).
         batch_started = time.time()
@@ -3859,12 +4668,15 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
         while True:
             if _traffic_should_stop():
                 break
+            observed = _live_failure_count()
             if target_total is not None and total_submitted >= target_total:
-                # Keep sleeping only if fail catch-up is still needed; otherwise
-                # exit the interval wait and let the outer loop catch up / stop.
-                if (target_fails is None
-                        or total_fail_stamped >= target_fails):
-                    break
+                break
+            if (
+                target_fails is not None
+                and observed >= target_fails
+                and (target_total is None or total_submitted >= target_total)
+            ):
+                break
             extend_n = _pop_extend_batches()
             if extend_n > 0:
                 with LOCK:
@@ -3876,16 +4688,10 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
             if elapsed >= DEMO_BATCH_INTERVAL_SEC:
                 break
             if time.time() >= deadline and not int(STATE.get("extend_batches") or 0):
-                # Finish interval only if no pending extend and no fail shortfall.
                 with LOCK:
                     pending = int(STATE.get("extend_batches") or 0)
                 if pending <= 0 and time.time() >= deadline:
-                    if (target_fails is not None
-                            and total_fail_stamped < target_fails):
-                        break  # outer loop will catch up
                     break
-            # Live heartbeat between batches (~every 3s): windows, queue
-            # depth and countdown keep moving so the panel never idles.
             if time.time() - last_live_update >= 3.0:
                 last_live_update = time.time()
                 live = _fetch_live_gate_state(ZUUL_API) or {}
@@ -3909,6 +4715,7 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
                         live_depth, live_rl, live_tcp),
                     time_remaining_s=round(remaining, 1),
                     expected_failures=expected_fails,
+                    gate_failures_target=target_fails,
                     message=(
                         f"Batch {batch_num} done — next batch in "
                         f"{until_next:.0f}s · gate queue {live_depth} "
@@ -3921,27 +4728,19 @@ def _run_continuous_traffic_loop(markers: Path) -> dict:
 
         if _traffic_should_stop():
             break
-        if (target_total is not None and total_submitted >= target_total
-                and (target_fails is None
-                     or total_fail_stamped >= target_fails)):
-            break
-        if (target_fails is not None and target_fails > 0
-                and total_fail_stamped >= target_fails
-                and target_total is None):
-            break
-        if time.time() >= deadline:
-            if (target_fails is not None
-                    and total_fail_stamped < target_fails):
-                # Outer loop starts another catch-up batch.
-                continue
-            extend_n = _pop_extend_batches()
-            if extend_n <= 0:
-                break
-            with LOCK:
-                STATE["traffic_deadline"] = time.time() + (
-                    extend_n * DEMO_BATCH_INTERVAL_SEC)
 
-    _set_demo_progress(traffic_active=False)
+    if (
+        target_fails is not None
+        and target_fails > 0
+        and not _traffic_should_stop()
+    ):
+        observed = _wait_for_observed_failures(
+            target_fails,
+            min(DEMO_FAIL_CATCH_UP_WAIT_SEC, 30.0),
+        )
+        _set_demo_progress(failures_so_far=observed)
+
+    _set_demo_progress(traffic_active=False, failures_so_far=_observed())
     return {
         "batches": batch_num,
         "submitted": total_submitted,
@@ -3979,10 +4778,16 @@ def extend_demo():
 
     with LOCK:
         running = bool(STATE["running"])
+        stopping = bool(STATE.get("stopping") or STATE.get("stop_requested"))
         if not running:
             return jsonify({
                 "ok": False,
                 "message": "no active demo session — start with /run-demo first",
+            }), 409
+        if stopping:
+            return jsonify({
+                "ok": False,
+                "message": "demo is stopping — wait until Run demo is enabled",
             }), 409
         STATE["extend_batches"] = int(STATE.get("extend_batches") or 0) + add_batches
         cur_deadline = STATE.get("traffic_deadline")
@@ -4013,6 +4818,147 @@ def extend_demo():
     })
 
 
+def _finish_stopped_demo(demo_id: Optional[str], message: str) -> None:
+    """Mark the interrupted demo complete so /run-demo can start again."""
+    with LOCK:
+        current = STATE.get("active_demo_id")
+        if current is not None and current != demo_id:
+            return
+        STATE["running"] = False
+        STATE["stopping"] = False
+        STATE["stop_requested"] = False
+        STATE["traffic_stop"] = False
+        STATE["finished_at"] = time.time()
+        STATE["last_error"] = None
+        STATE["extend_batches"] = 0
+        if current == demo_id:
+            STATE["active_demo_id"] = None
+    _set_demo_progress(
+        phase="cancelled",
+        message=message,
+        percent=100,
+        traffic_active=False,
+        extend_available=False,
+        stop_available=False,
+        stopping=False,
+    )
+
+
+def _stop_demo_background(demo_id: str) -> None:
+    """Stop traffic (already flagged) and drain check+gate queues."""
+    try:
+        def _on_poll(depth: int, removed: int):
+            if not _owns_demo(demo_id):
+                return
+            _set_demo_progress(
+                phase="stopping",
+                queue_depth_remaining=depth,
+                queues_cleared=removed,
+                message=(
+                    f"{STOPPING_MESSAGE} ({depth} left)"
+                    if depth else
+                    STOPPING_MESSAGE
+                ),
+                traffic_active=False,
+                extend_available=False,
+            )
+
+        try:
+            initial_status = _fetch_tenant_status(ZUUL_API)
+            initial_items = _all_queue_item_count(initial_status)
+            initial_depth = _all_queue_depth(initial_status)
+        except Exception:
+            initial_items, initial_depth = 0, 0
+        clear_timeout = _effective_queue_clear_timeout(
+            initial_items, initial_depth)
+        queues_empty, total_cleared, elapsed = wait_for_empty_queues(
+            ZUUL_API,
+            timeout=clear_timeout,
+            on_poll=_on_poll,
+            initial_scheduler_wait=DEMO_SCHEDULER_PURGE_WAIT,
+            request_scheduler_purge=_request_scheduler_purge,
+            require_gate_only=False,
+        )
+        if queues_empty:
+            msg = (
+                f"Demo stopped — queues cleared "
+                f"({total_cleared} dequeued in {elapsed:.1f}s). "
+                "Click Run demo to start."
+            )
+        else:
+            remaining = 0
+            try:
+                remaining = _all_queue_item_count(
+                    _fetch_tenant_status(ZUUL_API))
+            except Exception:
+                pass
+            msg = (
+                f"Demo stopped — queues still draining "
+                f"({total_cleared} dequeued, {remaining} remaining). "
+                "Click Run demo to start."
+            )
+        _finish_stopped_demo(demo_id, msg)
+    except Exception as exc:
+        log.exception("stop-demo queue clear failed")
+        _finish_stopped_demo(
+            demo_id,
+            f"Demo stopped — queue clear error: {exc}. "
+            "Click Run demo to start.",
+        )
+
+
+@APP.route("/stop-demo", methods=["POST", "OPTIONS"])
+@APP.route("/close-demo", methods=["POST", "OPTIONS"])
+def stop_demo():
+    """Interrupt the current demo, stop traffic, and drain queues.
+
+    Idempotent when no demo is running. While stopping, /run-demo stays
+    409 until queues have been cleared (or the clear attempt finishes).
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    with LOCK:
+        running = bool(STATE["running"])
+        already_stopping = bool(
+            STATE.get("stopping") or STATE.get("stop_requested"))
+        demo_id = (STATE.get("demo_progress") or {}).get("demo_id")
+        if not running:
+            return jsonify({
+                "ok": True,
+                "stopped": False,
+                "already_stopped": True,
+                "message": "no demo running",
+            })
+        if already_stopping:
+            return jsonify({
+                "ok": True,
+                "stopped": True,
+                "phase": "stopping",
+                "demo_id": demo_id,
+                "message": STOPPING_MESSAGE,
+            })
+        STATE["stop_requested"] = True
+        STATE["stopping"] = True
+        STATE["traffic_stop"] = True
+        STATE["extend_batches"] = 0
+    _set_demo_progress(
+        phase="stopping",
+        message=STOPPING_MESSAGE,
+        traffic_active=False,
+        extend_available=False,
+    )
+    thread = threading.Thread(
+        target=_stop_demo_background, args=(demo_id,), daemon=True)
+    thread.start()
+    return jsonify({
+        "ok": True,
+        "stopped": True,
+        "phase": "stopping",
+        "demo_id": demo_id,
+        "message": STOPPING_MESSAGE,
+    })
+
+
 def _run_demo_background(demo_id: str):
     run_id = demo_id
     out = BASE_DIR / run_id
@@ -4036,16 +4982,22 @@ def _run_demo_background(demo_id: str):
                     "Syncing zuul-config (check → Verified+1 → gate) "
                     f"and verifying layout… {elapsed:.0f}s"
                 ),
+                demo_id=demo_id,
                 percent=4):
             _ensure_check_then_gate_layout()
+        if _demo_thread_should_exit(demo_id):
+            return
         _ensure_executor_ready(update_progress=True)
+        if _demo_thread_should_exit(demo_id):
+            return
 
         with LOCK:
             session_start = STATE.get("demo_session_start")
-            STATE["traffic_stop"] = False
-            STATE["extend_batches"] = 0
-            STATE["traffic_deadline"] = time.time() + DEMO_DURATION_SEC
-            STATE["batches_completed"] = 0
+            if not (STATE.get("stop_requested") or STATE.get("stopping")):
+                STATE["traffic_stop"] = False
+                STATE["extend_batches"] = 0
+                STATE["traffic_deadline"] = time.time() + DEMO_DURATION_SEC
+                STATE["batches_completed"] = 0
         if session_start is None:
             session_start = time.time()
 
@@ -4059,6 +5011,9 @@ def _run_demo_background(demo_id: str):
                 percent=5,
             )
             _wait_for_demo_reset(session_start)
+
+        if _demo_thread_should_exit(demo_id):
+            return
 
         _set_demo_progress(
             phase="clearing_queues",
@@ -4102,16 +5057,20 @@ def _run_demo_background(demo_id: str):
         initial_status = _fetch_tenant_status(ZUUL_API)
         initial_depth = _all_queue_depth(initial_status)
         initial_items = _all_queue_item_count(initial_status)
+        # Scale from check+gate leftovers. Gate-only counts produced a ~30s
+        # timeout while hundreds of check items (prior demos) sat untouched.
         clear_timeout = _effective_queue_clear_timeout(
-            _gate_queue_item_count(initial_status),
-            _gate_queue_depth(initial_status))
+            initial_items, initial_depth)
         _set_demo_progress(queue_depth_remaining=initial_items)
         log.info(
-            "queue_depth_before_clear items=%d heads=%d timeout=%.1fs gate_heads=%d",
+            "queue_depth_before_clear items=%d heads=%d timeout=%.1fs "
+            "gate_items=%d gate_heads=%d check_items=%d",
             initial_items,
             initial_depth,
             clear_timeout,
+            _gate_queue_item_count(initial_status),
             _gate_queue_depth(initial_status),
+            _queue_counts_by_pipeline(initial_status).get("check", 0),
         )
         queues_empty, total_cleared, dequeue_sec = wait_for_empty_queues(
             ZUUL_API,
@@ -4119,25 +5078,30 @@ def _run_demo_background(demo_id: str):
             on_poll=_on_queue_poll,
             initial_scheduler_wait=DEMO_SCHEDULER_PURGE_WAIT,
             request_scheduler_purge=_request_scheduler_purge,
-            require_gate_only=True,
+            require_gate_only=False,
+            should_stop=lambda: _demo_thread_should_exit(demo_id),
         )
         log.info(
             "dequeue_completed_in_sec=%.2f removed=%d empty=%s",
             dequeue_sec, total_cleared, queues_empty)
+        if _demo_thread_should_exit(demo_id):
+            return
         if not queues_empty:
             final_status = _fetch_tenant_status(ZUUL_API)
             backlog = _describe_queue_backlog(final_status)
+            by_pipe = _queue_counts_by_pipeline(final_status)
             raise RuntimeError(
-                "gate pipeline still has backlog after clear timeout "
+                "pipelines still have backlog after clear timeout "
                 f"({total_cleared} cleared, "
-                f"{_gate_queue_item_count(final_status)} gate remaining, "
+                f"{by_pipe.get(DEMO_PIPELINE, 0)} gate remaining, "
+                f"{by_pipe.get('check', 0)} check remaining, "
                 f"{dequeue_sec:.1f}s): {json.dumps(backlog)}")
         _set_demo_progress(
             phase="clearing_queues",
             queues_cleared=total_cleared,
             queue_depth_remaining=0,
             message=(
-                f"Gate queue empty "
+                f"Check and gate empty "
                 f"({total_cleared} dequeued in {dequeue_sec:.1f}s)"
             ),
             percent=20,
@@ -4145,8 +5109,12 @@ def _run_demo_background(demo_id: str):
         )
 
         _ensure_executor_ready(update_progress=True)
+        if _demo_thread_should_exit(demo_id):
+            return
 
         traffic_summary = _run_continuous_traffic_loop(markers)
+        if _demo_thread_should_exit(demo_id):
+            return
         time.sleep(2.0)
         post_status = _fetch_tenant_status(ZUUL_API)
         by_pipe = _queue_counts_by_pipeline(post_status)
@@ -4180,6 +5148,8 @@ def _run_demo_background(demo_id: str):
 
         build_stats = _wait_for_gate_build_activity(
             session_start, on_poll=_on_build_poll)
+        if _demo_thread_should_exit(demo_id):
+            return
         _set_demo_progress(
             phase="waiting_gate_cycles",
             message=(
@@ -4197,18 +5167,23 @@ def _run_demo_background(demo_id: str):
         wait_total = int(_effective_demo_gate_wait_sec())
         interval = 2
         steps = max(1, wait_total // interval)
+        with LOCK:
+            drain_target = STATE.get("demo_gate_failures")
         for step in range(steps):
             elapsed = (step + 1) * interval
             pct = 76 + int(12 * elapsed / wait_total)
-            failures = _live_failure_count()
+            failures = _live_failure_count(fresh=True)
             cycles = _audit_tcp_shadow_count(session_start)
             live = _fetch_live_gate_state(ZUUL_API) or {}
+            fail_note = str(failures)
+            if drain_target is not None:
+                fail_note = f"{failures}/{int(drain_target)}"
             _set_demo_progress(
                 phase="waiting_gate_cycles",
                 message=(
                     f"Draining gate cycles "
                     f"({elapsed}s / {wait_total}s) — "
-                    f"{failures} gate failure(s), {cycles} merge cycle(s)"
+                    f"{fail_note} gate FAILURES, {cycles} gate cycle(s) total"
                 ),
                 wait_elapsed_s=float(elapsed),
                 wait_total_s=float(wait_total),
@@ -4222,9 +5197,18 @@ def _run_demo_background(demo_id: str):
                     float(live.get("rl_window") or DEFAULT_INITIAL_WINDOW),
                     float(live.get("tcp_window") or DEFAULT_INITIAL_WINDOW),
                 ),
+                expected_failures=_session_expected_failures(),
+                gate_failures_target=drain_target,
                 percent=min(88, pct),
             )
+            if drain_target is not None and failures >= int(drain_target):
+                break
+            if _demo_thread_should_exit(demo_id):
+                return
             time.sleep(interval)
+
+        if _demo_thread_should_exit(demo_id):
+            return
 
         _mark(markers, "after-burst")
         _set_demo_progress(
@@ -4243,8 +5227,12 @@ def _run_demo_background(demo_id: str):
                     "Collecting audit data and generating comparison "
                     f"report… {elapsed:.0f}s"
                 ),
+                demo_id=demo_id,
                 percent=91):
             build_report(audit_out, markers, out, ZUUL_API)
+
+        if _demo_thread_should_exit(demo_id):
+            return
 
         _set_demo_progress(
             phase="publishing",
@@ -4254,11 +5242,17 @@ def _run_demo_background(demo_id: str):
         _publish(out)
         _invalidate_live_metrics_cache()
 
+        if _demo_thread_should_exit(demo_id):
+            return
+
         with LOCK:
+            if STATE.get("active_demo_id") != demo_id:
+                return
             STATE["running"] = False
             STATE["finished_at"] = time.time()
             STATE["latest_run"] = run_id
             STATE["traffic_stop"] = False
+            STATE["active_demo_id"] = None
         _set_demo_progress(
             phase="done",
             message=f"Demo complete — report {run_id} published",
@@ -4268,11 +5262,16 @@ def _run_demo_background(demo_id: str):
             traffic_active=False,
         )
     except (CalledProcessError, RuntimeError, Exception) as exc:
+        if _demo_thread_should_exit(demo_id):
+            return
         with LOCK:
+            if STATE.get("active_demo_id") != demo_id:
+                return
             STATE["running"] = False
             STATE["finished_at"] = time.time()
             STATE["last_error"] = str(exc)
             STATE["traffic_stop"] = True
+            STATE["active_demo_id"] = None
         _set_demo_progress(
             phase="error",
             message=str(exc),

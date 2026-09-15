@@ -1,0 +1,55 @@
+=== SHADOW EVAL START Sat Sep 12 13:59:29 IST 2026 : 1 cycles ===
+--- Cycle 1/1: POST /run-demo Sat Sep 12 13:59:30 IST 2026 ---
+{"baseline_window":8,"demo_id":"20260912-082930","expected_failures":75,"gate_failures":null,"message":"demo started","ok":true,"phase":"starting","session_start":1789201770.550463,"total_changes":null}
+  [30s] phase=submitting_traffic running=true
+  [60s] phase=submitting_traffic running=true
+  [90s] phase=submitting_traffic running=true
+  [120s] phase=submitting_traffic running=true
+  [150s] phase=submitting_traffic running=true
+  [180s] phase=submitting_traffic running=true
+  [210s] phase=submitting_traffic running=true
+  [240s] phase=submitting_traffic running=true
+  [270s] phase=submitting_traffic running=true
+  [300s] phase=submitting_traffic running=true
+  [330s] phase=submitting_traffic running=true
+  [360s] phase=submitting_traffic running=true
+  [390s] phase=submitting_traffic running=true
+  [420s] phase=submitting_traffic running=true
+  [450s] phase=submitting_traffic running=true
+  [480s] phase=submitting_traffic running=true
+  [510s] phase=submitting_traffic running=true
+  [540s] phase=submitting_traffic running=true
+  [570s] phase=submitting_traffic running=true
+  [600s] phase=submitting_traffic running=true
+  [630s] phase=submitting_traffic running=true
+  [660s] phase=submitting_traffic running=true
+  [690s] phase=submitting_traffic running=true
+  [720s] phase=submitting_traffic running=true
+  [750s] phase=submitting_traffic running=true
+  [780s] phase=submitting_traffic running=true
+  [810s] phase=submitting_traffic running=true
+  [840s] phase=submitting_traffic running=true
+  [870s] phase=submitting_traffic running=true
+  [900s] phase=submitting_traffic running=true
+  [930s] phase=submitting_traffic running=true
+  [960s] phase=submitting_traffic running=true
+  [990s] phase=submitting_traffic running=true
+  [1020s] phase=submitting_traffic running=true
+  [1050s] phase=submitting_traffic running=true
+  [1080s] phase=submitting_traffic running=true
+  [1110s] phase=submitting_traffic running=true
+  [1140s] phase=submitting_traffic running=true
+  [1170s] phase=submitting_traffic running=true
+  [1200s] phase=submitting_traffic running=true
+  [1230s] phase=waiting_gate_cycles running=true
+  [1260s] phase=waiting_gate_cycles running=true
+  [1290s] phase=waiting_gate_cycles running=true
+  [1320s] phase=waiting_gate_cycles running=true
+  [1350s] phase=waiting_gate_cycles running=true
+  [1380s] phase=done running=false
+  [1410s] phase=done running=false
+  [1440s] phase=done running=false
+  [1470s] phase=done running=false
+  [1500s] phase=done running=false
+--- Cycle 1/1 done Sat Sep 12 14:25:39 IST 2026 ---
+=== SHADOW EVAL END Sat Sep 12 14:25:45 IST 2026 ===

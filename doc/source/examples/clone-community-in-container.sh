@@ -25,10 +25,11 @@ docker run --rm \
   -v "$TARGET_REPO:/dst" \
   alpine sh -c '
     set -e
-    mkdir -p /dst/research /dst/doc/source/examples /dst/zuul /dst/tests/unit
+    mkdir -p /dst/research /dst/doc/source/examples /dst/zuul /dst/zuul/launcher /dst/tests/unit
     cp -a /src/research/. /dst/research/
     cp -a /src/doc/source/examples/. /dst/doc/source/examples/
     cp -a /src/zuul/rl_window.py /dst/zuul/rl_window.py
+    cp -a /src/zuul/launcher/client.py /dst/zuul/launcher/client.py
     cp -a /src/zuul/scheduler.py /dst/zuul/scheduler.py
     cp -a /src/zuul/manager/__init__.py /dst/zuul/manager/__init__.py
     cp -a /src/tests/unit/test_rl_window.py /dst/tests/unit/test_rl_window.py

@@ -11,7 +11,7 @@ TCP window algorithm in the turnkey RL demo.
 | **RL active window** | Applied to the gate pipeline (`mode=active`) | Agent ticks (every 10s) and after each gate merge cycle |
 | **TCP shadow window** | Hypothetical TCP-only window (same rules as Zuul: grow on success, shrink on failure) | Each gate merge cycle (`tcp_shadow` audit events) |
 
-Both start at **window 8** (floor 2, ceiling 50) on every **Run demo** reset.
+Both start at **window 8** (floor 2, ceiling 25) on every **Run demo** reset.
 Small initial windows make divergence visible fast: the gate queue only needs
 ~10 changes to saturate both windows.
 
@@ -63,7 +63,11 @@ When the queue is saturated both windows are fully utilized, so
 `should_fail: true/false` into each change's `demo-meta.json`.
 With no UI/API targets, the first half of every batch fails (50% ratio).
 When `/run-demo` receives `total_changes` / `gate_failures`, fails are
-distributed so the session stamps exactly the requested count.
+distributed so the session **completes** exactly the requested count of
+`research-gate-job` FAILURE results (stamped `should_fail`). Stamps that
+time out in check or are skipped by Depends-On are replaced with
+catch-up failing changes. Exact `gate_failures` disables the Depends-On
+scenario so each fail stamp can run its own gate job.
 
 Optional Run demo body (empty body keeps duration defaults):
 
@@ -130,7 +134,8 @@ Adaptive batches (≤ 20) stay within the 50-slot capacity.
 1. Reset RL/TCP windows to 8.
 2. Clear gate queues.
 3. Continuous adaptive traffic for 5 minutes (or until `total_changes`),
-   queue kept > max(RL, TCP) + 4; fail stamps honor `gate_failures` when set.
+   queue kept > max(RL, TCP) + 4; when `gate_failures=N` is set, traffic
+   continues / catch-up until **N completed gate job FAILURES** are observed.
 4. **Extend session** adds more batches without cancelling in-flight builds.
 5. Drain + publish comparison report.
 
